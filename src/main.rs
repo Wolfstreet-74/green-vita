@@ -3,6 +3,7 @@ use vita_newlib_shims as _;
 mod api;
 mod api_xbox;
 mod app;
+mod diag_log;
 mod i18n;
 mod input;
 mod jobs;
@@ -43,6 +44,10 @@ mod fs_utils {
 }
 
 fn main() -> anyhow::Result<()> {
+    diag_log::log(
+        "app",
+        format!("GreenVita {} starting", env!("CARGO_PKG_VERSION")),
+    );
     let _app_util = safe_memory::AppUtil::initialize()?;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()

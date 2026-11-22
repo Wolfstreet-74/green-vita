@@ -12,6 +12,12 @@ use std::time::Instant;
 // allow enough room for roughly 100 ms of compressed video near the observed 55 fps.
 const MIN_PENDING_ACCESS_UNITS: usize = 2;
 const MAX_PENDING_ACCESS_UNITS: usize = 6;
+/// A healthy decoder outputs a picture for (almost) every access unit. If this many in a row
+/// produce nothing, the decoder setup does not match the stream (usually too few reference
+/// frames), so report it as an error and let the receiver rebuild a larger decoder.
+const MAX_ACCESS_UNITS_WITHOUT_PICTURE: u32 = 45;
+/// Prefix of the error published for that case, so the receiver can recognise it.
+pub(crate) const NO_PICTURE_ERROR: &str = "decoder produced no picture";
 
 struct QueuedAccessUnit {
     data: Vec<u8>,
@@ -21,6 +27,7 @@ struct QueuedAccessUnit {
 
 enum DecoderCommand {
     Reset,
+    Reconfigure(DecoderConfig),
     Stop,
 }
 
@@ -114,6 +121,13 @@ impl VideoDecodeWorker {
         let _ = self.commands.send(DecoderCommand::Reset);
     }
 
+    /// Rebuilds the hardware decoder with a new setup before the next queued access unit.
+    pub fn reconfigure(&self, config: DecoderConfig) {
+        self.generation.fetch_add(1, Ordering::AcqRel);
+        metrics::METRICS.resets.fetch_add(1, Ordering::Relaxed);
+        let _ = self.commands.send(DecoderCommand::Reconfigure(config));
+    }
+
     pub fn begin_resync(&self) {
         self.generation.fetch_add(1, Ordering::AcqRel);
         metrics::METRICS.resyncs.fetch_add(1, Ordering::Relaxed);
@@ -147,16 +161,24 @@ fn run_decode_loop(
     latest_result: Arc<Mutex<Option<DecodeResult>>>,
     result_ready: Arc<tokio::sync::Notify>,
     initial_decoder: HwVideoDecoder,
-    config: DecoderConfig,
+    mut config: DecoderConfig,
     direct_output: Arc<DirectVideoOutput>,
 ) {
     let mut decoder = Some(initial_decoder);
+    let mut without_picture = 0u32;
 
     loop {
         select_biased! {
             recv(commands) -> command => match command {
                 Ok(DecoderCommand::Reset) => {
                     decoder = None;
+                    without_picture = 0;
+                    continue;
+                }
+                Ok(DecoderCommand::Reconfigure(new_config)) => {
+                    config = new_config;
+                    decoder = None;
+                    without_picture = 0;
                     continue;
                 }
                 Ok(DecoderCommand::Stop) | Err(_) => break,
@@ -171,6 +193,7 @@ fn run_decode_loop(
                     &result_ready,
                     access_unit,
                     &direct_output,
+                    &mut without_picture,
                 );
             }
         }
@@ -185,6 +208,7 @@ fn decode_queued_access_unit(
     result_ready: &tokio::sync::Notify,
     access_unit: QueuedAccessUnit,
     direct_output: &DirectVideoOutput,
+    without_picture: &mut u32,
 ) {
     if access_unit.generation != generation.load(Ordering::Acquire) {
         return;
@@ -194,6 +218,7 @@ fn decode_queued_access_unit(
         match HwVideoDecoder::new(config) {
             Ok(new_decoder) => *decoder = Some(new_decoder),
             Err(error) => {
+                crate::diag_log::log("video", format!("H264 decoder creation failed: {error:#}"));
                 publish_result(
                     latest_result,
                     result_ready,
@@ -228,6 +253,7 @@ fn decode_queued_access_unit(
 
     match decode_result {
         Ok(Ok(true)) => {
+            *without_picture = 0;
             metrics::METRICS.decoded.fetch_add(1, Ordering::Relaxed);
             let (texture_index, generation) = direct_target.publish();
             metrics::METRICS.pipeline_age_us.store(
@@ -243,8 +269,22 @@ fn decode_queued_access_unit(
                 }),
             );
         }
-        Ok(Ok(false)) => {}
+        Ok(Ok(false)) => {
+            *without_picture += 1;
+            if *without_picture >= MAX_ACCESS_UNITS_WITHOUT_PICTURE {
+                *without_picture = 0;
+                *decoder = None;
+                publish_result(
+                    latest_result,
+                    result_ready,
+                    Err(format!(
+                        "{NO_PICTURE_ERROR} after {MAX_ACCESS_UNITS_WITHOUT_PICTURE} access units"
+                    )),
+                );
+            }
+        }
         Ok(Err(error)) => {
+            *without_picture = 0;
             *decoder = None;
             publish_result(latest_result, result_ready, Err(error.to_string()));
         }

@@ -22,6 +22,8 @@ settings-rear-touch-enabled = Enable rear touch controls
 settings-cloud-host = Cloud host: { $host }
 settings-home-host = Home host: { $host }
 settings-stream-debug-info = Show streaming debug info
+settings-video-compat-mode = Compatible video mode (black screen fix)
+settings-video-compat-mode-hint = Use if a game has sound but no picture. Uses more memory.
 action-back = Back
 
 mode-select-cloud-subtitle = Stream Xbox Cloud Gaming titles

@@ -101,6 +101,9 @@ pub struct Settings {
     pub locale: Locale,
     /// Shows internal stream/session state on the `Streaming` screen. Off by default.
     pub show_stream_debug_info: bool,
+    /// Starts streams with a large hardware decoder (1920x1088, several reference frames).
+    /// Fallback for games that play sound but show a black screen. Off by default.
+    pub video_compat_mode: bool,
     pub game_profiles: HashMap<String, GameProfile>,
 }
 
@@ -130,6 +133,7 @@ impl Default for Settings {
         Self {
             locale: Locale::default(),
             show_stream_debug_info: false,
+            video_compat_mode: false,
             game_profiles: HashMap::new(),
         }
     }

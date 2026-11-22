@@ -40,6 +40,7 @@ pub struct App {
 impl App {
     pub fn new() -> Result<Self> {
         let settings = Settings::load();
+        crate::streaming::video::set_video_compat_mode(settings.video_compat_mode);
         let service = Service::new(settings.locale.as_str());
 
         Ok(Self {

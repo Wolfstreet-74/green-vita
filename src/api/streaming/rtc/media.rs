@@ -41,7 +41,7 @@ impl VideoReceiver {
             track_id: None,
             receiver_id: None,
             ssrc: None,
-            rtp: rtp::VideoRtp::new(),
+            rtp: rtp::VideoRtp::new(config),
             decoder: VideoDecodeWorker::spawn(config, direct_output)?,
             latest_frame: None,
             next_frame_id: 0,
@@ -92,11 +92,12 @@ impl VideoReceiver {
         {
             match result {
                 Ok(frame) => {
+                    self.rtp.on_picture_decoded();
                     self.next_frame_id = self.next_frame_id.wrapping_add(1);
                     self.latest_frame = Some((self.next_frame_id, frame));
                 }
                 Err(error) => {
-                    eprintln!("Failed to decode H264 video frame: {error}");
+                    self.rtp.on_decode_failure(&self.decoder, &error);
                     decode_errors = decode_errors.saturating_add(1);
                     *keyframe_requested = true;
                 }
@@ -141,8 +142,12 @@ impl VideoReceiver {
             .encoded_resolution
             .map(|(width, height)| format!("{width}x{height}"))
             .unwrap_or_else(|| "?".to_owned());
+        let decoder = self.rtp.decoder_config();
         Some(format!(
-            "enc:{encoded_resolution} srcfps:{source_fps} {performance} wait:{} drop:{} err:{}",
+            "enc:{encoded_resolution} dec:{}x{}/r{} srcfps:{source_fps} {performance} wait:{} drop:{} err:{}",
+            decoder.decode_width,
+            decoder.decode_height,
+            decoder.ref_frames,
             u8::from(self.rtp.waiting_for_keyframe()),
             self.stats.dropped,
             self.stats.decode_errors,

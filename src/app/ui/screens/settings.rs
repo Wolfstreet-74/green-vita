@@ -16,6 +16,7 @@ pub enum Command {
     SetRearTouchEnabled { title_id: String, enabled: bool },
     SetFrontTouchAuxiliaryButtons { title_id: String, enabled: bool },
     SetShowStreamDebugInfo(bool),
+    SetVideoCompatMode(bool),
 }
 
 #[derive(Clone)]
@@ -26,6 +27,7 @@ enum SettingsRow {
     GameRearTouch { title_id: String, enabled: bool },
     GameFrontTouchAuxiliary { title_id: String, enabled: bool },
     StreamDebug(bool),
+    VideoCompat(bool),
     Back,
 }
 
@@ -69,6 +71,7 @@ fn settings_rows(app: &App) -> Vec<SettingsRow> {
     rows.push(SettingsRow::StreamDebug(
         app.settings.show_stream_debug_info,
     ));
+    rows.push(SettingsRow::VideoCompat(app.settings.video_compat_mode));
     rows.push(SettingsRow::Back);
     rows
 }
@@ -231,6 +234,18 @@ pub(crate) fn show(ctx: &egui::Context, app: &App, commands: &mut Vec<AppCommand
                     );
                 }
                 row_index += 1;
+
+                if checkbox_row(
+                    ui,
+                    selected_index == row_index,
+                    app.settings.video_compat_mode,
+                    i18n.text("settings-video-compat-mode"),
+                ) {
+                    commands
+                        .push(Command::SetVideoCompatMode(!app.settings.video_compat_mode).into());
+                }
+                row_index += 1;
+                ui.colored_label(theme.text, i18n.text("settings-video-compat-mode-hint"));
 
                 ui.add_space(14.0);
                 ui.separator();
@@ -395,6 +410,9 @@ impl App {
             SettingsRow::StreamDebug(enabled) => {
                 return self.handle_settings_command(Command::SetShowStreamDebugInfo(!enabled));
             }
+            SettingsRow::VideoCompat(enabled) => {
+                return self.handle_settings_command(Command::SetVideoCompatMode(!enabled));
+            }
             SettingsRow::Back => {}
         }
 
@@ -468,6 +486,11 @@ impl App {
             }
             Command::SetShowStreamDebugInfo(enabled) => {
                 self.settings.show_stream_debug_info = enabled;
+                self.settings.save();
+            }
+            Command::SetVideoCompatMode(enabled) => {
+                self.settings.video_compat_mode = enabled;
+                crate::streaming::video::set_video_compat_mode(enabled);
                 self.settings.save();
             }
         }

@@ -1,4 +1,8 @@
-use crate::streaming::video::{STREAM_HEIGHT, STREAM_WIDTH, VideoDecodeWorker};
+use crate::diag_log;
+use crate::streaming::video::{
+    DecoderConfig, MAX_DECODE_HEIGHT, MAX_DECODE_WIDTH, MAX_REF_FRAMES, VideoDecodeWorker,
+    video_compat_mode,
+};
 use bytes::Bytes;
 use h264_reader::annexb::AnnexBReader;
 use h264_reader::nal::sps::SeqParameterSet;
@@ -64,6 +68,65 @@ pub(super) struct VideoRtp {
     damage_score: u8,
     stream_too_large: bool,
     waiting_for_keyframe: bool,
+    /// Setup of the hardware decoder currently used by the worker.
+    decoder_config: DecoderConfig,
+    /// Last SPS seen, used for logging changes and sizing the decoder.
+    last_sps: Option<SpsSummary>,
+    /// Decoder failures in a row without a decoded picture in between.
+    failures_without_picture: u32,
+    access_units: u64,
+    /// Latest SPS and PPS NAL units (without start code). A rebuilt hardware decoder forgets
+    /// them, and xCloud keyframes sent after a loss do not always repeat them, so they are put
+    /// back in front of any keyframe that lacks them.
+    cached_sps_nal: Option<Vec<u8>>,
+    cached_pps_nal: Option<Vec<u8>>,
+    parameter_sets_reinjected: u64,
+}
+
+/// The parts of an H.264 SPS that matter for the Vita hardware decoder.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) struct SpsSummary {
+    pub width: u32,
+    pub height: u32,
+    /// Size in whole macroblocks, as the decoder allocates it (before cropping).
+    pub coded_width: u32,
+    pub coded_height: u32,
+    pub profile_idc: u8,
+    pub level_idc: u8,
+    pub ref_frames: u32,
+    pub reorder_frames: Option<u32>,
+    pub frame_mbs_only: bool,
+}
+
+impl std::fmt::Display for SpsSummary {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let profile = match self.profile_idc {
+            66 => "Baseline",
+            77 => "Main",
+            88 => "Extended",
+            100 => "High",
+            110 => "High10",
+            122 => "High422",
+            244 => "High444",
+            _ => "other",
+        };
+        write!(
+            f,
+            "{}x{} (coded {}x{}) profile={}({}) level={}.{} ref_frames={} reorder={} progressive={}",
+            self.width,
+            self.height,
+            self.coded_width,
+            self.coded_height,
+            profile,
+            self.profile_idc,
+            self.level_idc / 10,
+            self.level_idc % 10,
+            self.ref_frames,
+            self.reorder_frames
+                .map_or_else(|| "?".to_owned(), |value| value.to_string()),
+            self.frame_mbs_only,
+        )
+    }
 }
 
 struct PendingVideoFrame {
@@ -152,7 +215,17 @@ impl PendingVideoFrame {
 }
 
 impl VideoRtp {
-    pub(super) fn new() -> Self {
+    pub(super) fn new(decoder_config: DecoderConfig) -> Self {
+        diag_log::log(
+            "video",
+            format!(
+                "Stream start: decoder {}x{} ref_frames={} compat_mode={}",
+                decoder_config.decode_width,
+                decoder_config.decode_height,
+                decoder_config.ref_frames,
+                video_compat_mode()
+            ),
+        );
         Self {
             depacketizer: H264Packet::default(),
             pending: None,
@@ -162,7 +235,87 @@ impl VideoRtp {
             damage_score: 0,
             stream_too_large: false,
             waiting_for_keyframe: false,
+            decoder_config,
+            last_sps: None,
+            failures_without_picture: 0,
+            access_units: 0,
+            cached_sps_nal: None,
+            cached_pps_nal: None,
+            parameter_sets_reinjected: 0,
         }
+    }
+
+    pub(super) fn decoder_config(&self) -> DecoderConfig {
+        self.decoder_config
+    }
+
+    /// Called for every picture the hardware decoder outputs.
+    pub(super) fn on_picture_decoded(&mut self) {
+        self.failures_without_picture = 0;
+    }
+
+    /// Called when the decoder reported errors. After repeated failures, rebuild the decoder
+    /// with more reference frames, which is what most "sound but no image" streams need.
+    pub(super) fn on_decode_failure(&mut self, worker: &VideoDecodeWorker, error: &str) {
+        self.failures_without_picture = self.failures_without_picture.saturating_add(1);
+        if self.failures_without_picture <= 20 || self.failures_without_picture % 50 == 0 {
+            diag_log::log(
+                "video",
+                format!(
+                    "Decode failure #{} (decoder {}x{} ref_frames={}): {error}",
+                    self.failures_without_picture,
+                    self.decoder_config.decode_width,
+                    self.decoder_config.decode_height,
+                    self.decoder_config.ref_frames,
+                ),
+            );
+        }
+        let no_picture = error.starts_with(crate::streaming::video::NO_PICTURE_ERROR);
+        if self.failures_without_picture < 2 && !no_picture {
+            return;
+        }
+
+        let current = self.decoder_config;
+        let wanted_refs = self
+            .last_sps
+            .map(|sps| sps.ref_frames.max(sps.reorder_frames.unwrap_or(0) + 1))
+            .unwrap_or(4)
+            .max(current.ref_frames.saturating_mul(2))
+            .clamp(2, MAX_REF_FRAMES);
+        if wanted_refs <= current.ref_frames {
+            return;
+        }
+        let new_config = DecoderConfig {
+            ref_frames: wanted_refs,
+            ..current
+        };
+        diag_log::log(
+            "video",
+            format!(
+                "Rebuilding decoder after failures: ref_frames {} -> {}",
+                current.ref_frames, new_config.ref_frames
+            ),
+        );
+        self.decoder_config = new_config;
+        self.failures_without_picture = 0;
+        worker.reconfigure(new_config);
+    }
+
+    /// Returns a decoder setup that can handle `sps`, or `None` if the current one already can.
+    fn config_for_sps(&self, sps: &SpsSummary) -> Option<DecoderConfig> {
+        let current = self.decoder_config;
+        let ref_frames = if video_compat_mode() {
+            current.ref_frames.max(sps.ref_frames.min(MAX_REF_FRAMES))
+        } else {
+            current.ref_frames
+        };
+        let wanted = DecoderConfig {
+            decode_width: current.decode_width.max(sps.coded_width),
+            decode_height: current.decode_height.max(sps.coded_height),
+            ref_frames,
+            ..current
+        };
+        (wanted != current).then_some(wanted)
     }
 
     pub(super) fn waiting_for_keyframe(&self) -> bool {
@@ -267,28 +420,70 @@ impl VideoRtp {
         self.last_frame_timestamp = Some(completed.timestamp);
 
         let unit = inspect_h264_access_unit(&data);
-        stats.encoded_resolution = unit.resolution;
-        let sample_too_large = unit
-            .resolution
-            .is_some_and(|(width, height)| width > STREAM_WIDTH || height > STREAM_HEIGHT);
-        if sample_too_large {
-            eprintln!(
-                "Dropping H264 access unit larger than decoder: {:?} > {}x{}",
-                unit.resolution, STREAM_WIDTH, STREAM_HEIGHT
-            );
-            self.stream_too_large = true;
-            // Flush queued decoder work once, then wait for a compatible IDR instead of feeding
-            // frames that the Vita hardware cannot decode.
-            *keyframe_requested = true;
-            if !self.waiting_for_keyframe {
-                worker.begin_resync();
+        self.access_units += 1;
+        stats.encoded_resolution = unit.sps.map(|sps| (sps.width, sps.height));
+        if let Some(sps) = unit.sps {
+            if self.last_sps != Some(sps) {
+                diag_log::log(
+                    "video",
+                    format!(
+                        "SPS: {sps} idr={} au_bytes={} au#={}",
+                        unit.has_idr,
+                        data.len(),
+                        self.access_units
+                    ),
+                );
+                self.last_sps = Some(sps);
             }
-            self.waiting_for_keyframe = true;
-            stats.dropped = stats.dropped.saturating_add(1);
-            return stats;
+            if let Some(new_config) = self.config_for_sps(&sps) {
+                if new_config.decode_width <= MAX_DECODE_WIDTH
+                    && new_config.decode_height <= MAX_DECODE_HEIGHT
+                {
+                    // Before this fix, a stream bigger than 1280x720 was dropped frame by
+                    // frame: sound and controls worked but the screen stayed black.
+                    diag_log::log(
+                        "video",
+                        format!(
+                            "Rebuilding decoder for stream: {}x{} ref_frames={} -> {}x{} ref_frames={}",
+                            self.decoder_config.decode_width,
+                            self.decoder_config.decode_height,
+                            self.decoder_config.ref_frames,
+                            new_config.decode_width,
+                            new_config.decode_height,
+                            new_config.ref_frames
+                        ),
+                    );
+                    self.decoder_config = new_config;
+                    self.stream_too_large = false;
+                    worker.reconfigure(new_config);
+                    // The new decoder must start on a keyframe.
+                    self.waiting_for_keyframe = true;
+                } else {
+                    if !self.stream_too_large {
+                        diag_log::log(
+                            "video",
+                            format!(
+                                "Stream {}x{} is larger than the Vita decoder limit {}x{}; dropping video",
+                                sps.coded_width,
+                                sps.coded_height,
+                                MAX_DECODE_WIDTH,
+                                MAX_DECODE_HEIGHT
+                            ),
+                        );
+                    }
+                    self.stream_too_large = true;
+                    *keyframe_requested = true;
+                    if !self.waiting_for_keyframe {
+                        worker.begin_resync();
+                    }
+                    self.waiting_for_keyframe = true;
+                    stats.dropped = stats.dropped.saturating_add(1);
+                    return stats;
+                }
+            }
         }
         if self.stream_too_large {
-            if unit.resolution.is_none() || !unit.has_idr {
+            if unit.sps.is_none() || !unit.has_idr {
                 *keyframe_requested = true;
                 self.waiting_for_keyframe = true;
                 stats.dropped = stats.dropped.saturating_add(1);
@@ -309,7 +504,38 @@ impl VideoRtp {
             self.damage_score = self.damage_score.saturating_sub(1);
         }
 
-        if !worker.submit_access_unit(data.to_vec(), self.source_frame_duration_us) {
+        if let Some(sps_nal) = &unit.sps_nal {
+            self.cached_sps_nal = Some(sps_nal.clone());
+        }
+        if let Some(pps_nal) = &unit.pps_nal {
+            self.cached_pps_nal = Some(pps_nal.clone());
+        }
+        let mut access_unit = data.to_vec();
+        if unit.has_idr
+            && (unit.sps_nal.is_none() || unit.pps_nal.is_none())
+            && let (Some(sps_nal), Some(pps_nal)) = (&self.cached_sps_nal, &self.cached_pps_nal)
+        {
+            let mut with_parameter_sets =
+                Vec::with_capacity(8 + sps_nal.len() + pps_nal.len() + access_unit.len());
+            for nal in [sps_nal, pps_nal] {
+                with_parameter_sets.extend_from_slice(&[0, 0, 0, 1]);
+                with_parameter_sets.extend_from_slice(nal);
+            }
+            with_parameter_sets.extend_from_slice(&access_unit);
+            access_unit = with_parameter_sets;
+            self.parameter_sets_reinjected += 1;
+            if self.parameter_sets_reinjected <= 3 || self.parameter_sets_reinjected % 50 == 0 {
+                diag_log::log(
+                    "video",
+                    format!(
+                        "Keyframe without SPS/PPS: re-sent cached ones to the decoder (x{})",
+                        self.parameter_sets_reinjected
+                    ),
+                );
+            }
+        }
+
+        if !worker.submit_access_unit(access_unit, self.source_frame_duration_us) {
             eprintln!("Video decoder queue is full; continuing while requesting a keyframe");
             *keyframe_requested = true;
             stats.dropped = stats.dropped.saturating_add(1);
@@ -355,13 +581,48 @@ fn timestamp_is_newer(candidate: u32, reference: u32) -> bool {
 
 struct AccessUnitInfo {
     has_idr: bool,
-    resolution: Option<(u32, u32)>,
+    sps: Option<SpsSummary>,
+    sps_nal: Option<Vec<u8>>,
+    pps_nal: Option<Vec<u8>>,
+}
+
+fn nal_bytes(nal: &RefNal<'_>) -> Option<Vec<u8>> {
+    use std::io::Read;
+    let mut bytes = Vec::new();
+    nal.reader().read_to_end(&mut bytes).ok()?;
+    (!bytes.is_empty()).then_some(bytes)
+}
+
+fn summarize_sps(sps: &SeqParameterSet) -> Option<SpsSummary> {
+    let (width, height) = sps.pixel_dimensions().ok()?;
+    let frame_mbs_only = matches!(
+        sps.frame_mbs_flags,
+        h264_reader::nal::sps::FrameMbsFlags::Frames
+    );
+    let height_in_mbs = sps.pic_height_in_map_units() * if frame_mbs_only { 1 } else { 2 };
+    Some(SpsSummary {
+        width,
+        height,
+        coded_width: sps.pic_width_in_mbs() * 16,
+        coded_height: height_in_mbs * 16,
+        profile_idc: sps.profile_idc.into(),
+        level_idc: sps.level_idc,
+        ref_frames: sps.max_num_ref_frames,
+        reorder_frames: sps
+            .vui_parameters
+            .as_ref()
+            .and_then(|vui| vui.bitstream_restrictions.as_ref())
+            .map(|restrictions| restrictions.max_num_reorder_frames),
+        frame_mbs_only,
+    })
 }
 
 fn inspect_h264_access_unit(data: &[u8]) -> AccessUnitInfo {
     let mut info = AccessUnitInfo {
         has_idr: false,
-        resolution: None,
+        sps: None,
+        sps_nal: None,
+        pps_nal: None,
     };
     let mut reader = AnnexBReader::accumulate(|nal: RefNal<'_>| {
         let Ok(header) = nal.header() else {
@@ -374,9 +635,16 @@ fn inspect_h264_access_unit(data: &[u8]) -> AccessUnitInfo {
             }
             UnitType::SeqParameterSet => {
                 if nal.is_complete() {
-                    info.resolution = SeqParameterSet::from_bits(nal.rbsp_bits())
-                        .and_then(|sps| sps.pixel_dimensions())
-                        .ok();
+                    info.sps = SeqParameterSet::from_bits(nal.rbsp_bits())
+                        .ok()
+                        .and_then(|sps| summarize_sps(&sps));
+                    info.sps_nal = nal_bytes(&nal);
+                }
+                NalInterest::Buffer
+            }
+            UnitType::PicParameterSet => {
+                if nal.is_complete() {
+                    info.pps_nal = nal_bytes(&nal);
                 }
                 NalInterest::Buffer
             }

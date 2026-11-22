@@ -5,9 +5,6 @@ use anyhow::{Result, bail};
 use std::os::raw::c_void;
 use vitasdk_sys::*;
 
-// The idea of reducing the reference frames came from MattKC on his Vanilla project
-// Make sure to check it out, good content :)
-const AVCDEC_NUM_REF_FRAMES: u32 = 1;
 // AVCDEC and SDL's Vita GXM renderer both support RGB565 natively. At 960x544 this halves the
 // decoder-to-texture traffic from roughly 2 MiB to 1 MiB per frame, which matters at 60 FPS.
 const OUTPUT_BYTES_PER_PIXEL: u32 = 2;
@@ -18,7 +15,7 @@ struct AvcdecLibrary {
 }
 
 impl AvcdecLibrary {
-    fn initialize(width: u32, height: u32) -> Result<Self> {
+    fn initialize(width: u32, height: u32, ref_frames: u32) -> Result<Self> {
         let module_loaded = unsafe {
             let loaded_before = sceSysmoduleIsLoaded(SCE_SYSMODULE_AVCDEC);
             let ret = sceSysmoduleLoadModule(SCE_SYSMODULE_AVCDEC);
@@ -40,7 +37,7 @@ impl AvcdecLibrary {
             size: size_of::<SceVideodecQueryInitInfoHwAvcdec>() as u32,
             horizontal: width,
             vertical: height,
-            numOfRefFrames: AVCDEC_NUM_REF_FRAMES,
+            numOfRefFrames: ref_frames,
             numOfStreams: 1,
         };
         let ret = unsafe { sceVideodecInitLibrary(SCE_VIDEODEC_TYPE_HW_AVCDEC, &init_info) };
@@ -89,12 +86,16 @@ pub struct HwVideoDecoder {
 impl HwVideoDecoder {
     pub fn new(config: DecoderConfig) -> Result<Self> {
         unsafe {
-            let library = AvcdecLibrary::initialize(config.decode_width, config.decode_height)?;
+            let library = AvcdecLibrary::initialize(
+                config.decode_width,
+                config.decode_height,
+                config.ref_frames,
+            )?;
 
             let query = SceAvcdecQueryDecoderInfo {
                 horizontal: config.decode_width,
                 vertical: config.decode_height,
-                numOfRefFrames: AVCDEC_NUM_REF_FRAMES,
+                numOfRefFrames: config.ref_frames,
             };
             let mut decoder_info = SceAvcdecDecoderInfo { frameMemSize: 0 };
             let ret = sceAvcdecQueryDecoderMemSize(
@@ -121,6 +122,18 @@ impl HwVideoDecoder {
                 bail!("sceAvcdecCreateDecoder failed: {ret:#x}");
             }
             let decoder = AvcdecDecoder(decoder_control);
+            crate::diag_log::log(
+                "video",
+                format!(
+                    "H264 decoder ready: max {}x{}, ref_frames={}, output {}x{}, frame memory {} KiB",
+                    config.decode_width,
+                    config.decode_height,
+                    config.ref_frames,
+                    config.output_width,
+                    config.output_height,
+                    decoder_info.frameMemSize / 1024
+                ),
+            );
 
             Ok(Self {
                 decoder,

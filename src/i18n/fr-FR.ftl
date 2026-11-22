@@ -22,6 +22,8 @@ settings-rear-touch-enabled = Activer les commandes tactiles arrière
 settings-cloud-host = Hôte cloud : { $host }
 settings-home-host = Hôte local : { $host }
 settings-stream-debug-info = Afficher les infos de débogage du streaming
+settings-video-compat-mode = Mode vidéo compatible (écran noir)
+settings-video-compat-mode-hint = À activer si un jeu a du son mais pas d'image. Utilise plus de mémoire.
 action-back = Retour
 
 mode-select-cloud-subtitle = Jeux via Xbox Cloud Gaming

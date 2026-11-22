@@ -56,6 +56,7 @@ pub(crate) struct RtcSession<B: RtcSessionBackend> {
     initial_video_watchdog_started_at: Option<Instant>,
     last_initial_video_keyframe_request: Option<Instant>,
     pub status: String,
+    status_reports: u64,
 }
 
 impl<B: RtcSessionBackend> RtcSession<B> {
@@ -80,6 +81,7 @@ impl<B: RtcSessionBackend> RtcSession<B> {
             initial_video_watchdog_started_at: None,
             last_initial_video_keyframe_request: None,
             status: "Negotiating WebRTC connection".to_owned(),
+            status_reports: 0,
         })
     }
 
@@ -128,7 +130,10 @@ impl<B: RtcSessionBackend> RtcSession<B> {
             let _ = self.peer.handle_timeout(now);
         }
         if self.initial_video_keyframe_due(now) {
-            eprintln!("No initial video RTP after WebRTC connected; requesting a keyframe");
+            crate::diag_log::log(
+                "video",
+                "No initial video RTP after WebRTC connected; requesting a keyframe",
+            );
             keyframe_requested = true;
         }
         self.request_keyframe(keyframe_requested, now);
@@ -138,7 +143,13 @@ impl<B: RtcSessionBackend> RtcSession<B> {
             } else {
                 format!("srv:? {status}")
             };
-            eprintln!("{}", self.status);
+            // Keep the card log readable: first 10 reports, then one every 10 seconds.
+            self.status_reports += 1;
+            if self.status_reports <= 10 || self.status_reports % 10 == 0 {
+                crate::diag_log::log("stats", &self.status);
+            } else {
+                eprintln!("{}", self.status);
+            }
         }
 
         Ok(gathered_candidates)

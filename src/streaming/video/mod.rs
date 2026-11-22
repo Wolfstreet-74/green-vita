@@ -8,8 +8,31 @@ pub const STREAM_HEIGHT: u32 = 720;
 pub const HW_OUTPUT_WIDTH: u32 = 960;
 pub const HW_OUTPUT_HEIGHT: u32 = 544;
 
+/// Reference frames used by default. Keeping this at 1 saves decoder memory and time, and works
+/// for streams whose encoder really references only the previous frame (idea from MattKC's
+/// Vanilla project). Streams that need more are detected and the decoder is rebuilt.
+pub const DEFAULT_REF_FRAMES: u32 = 1;
+/// Largest picture the Vita AVC hardware decoder accepts.
+pub const MAX_DECODE_WIDTH: u32 = 1920;
+pub const MAX_DECODE_HEIGHT: u32 = 1088;
+/// Cap for reference frames so a 1080p decoder still fits in the reserved CDRAM.
+pub const MAX_REF_FRAMES: u32 = 6;
+
+/// "Compatible video mode" from the settings: start with a 1920x1088 decoder and as many
+/// reference frames as the stream declares instead of the lean 1280x720 / 1-ref setup.
+static VIDEO_COMPAT_MODE: AtomicBool = AtomicBool::new(false);
+
+pub fn set_video_compat_mode(enabled: bool) {
+    VIDEO_COMPAT_MODE.store(enabled, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn video_compat_mode() -> bool {
+    VIDEO_COMPAT_MODE.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 pub use memory::reserve_decoder_cdram;
 pub use metrics::video_performance_summary;
+pub(crate) use worker::NO_PICTURE_ERROR;
 pub use worker::VideoDecodeWorker;
 
 use std::sync::atomic::AtomicBool;
@@ -136,10 +159,34 @@ pub struct DecodedFrame {
     pub generation: u64,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct DecoderConfig {
     pub decode_width: u32,
     pub decode_height: u32,
     pub output_width: u32,
     pub output_height: u32,
+    pub ref_frames: u32,
+}
+
+impl DecoderConfig {
+    /// The decoder the stream starts with, depending on the compatible video mode setting.
+    pub fn initial(output_width: u32, output_height: u32) -> Self {
+        if video_compat_mode() {
+            Self {
+                decode_width: MAX_DECODE_WIDTH,
+                decode_height: MAX_DECODE_HEIGHT,
+                output_width,
+                output_height,
+                ref_frames: 4,
+            }
+        } else {
+            Self {
+                decode_width: STREAM_WIDTH,
+                decode_height: STREAM_HEIGHT,
+                output_width,
+                output_height,
+                ref_frames: DEFAULT_REF_FRAMES,
+            }
+        }
+    }
 }
