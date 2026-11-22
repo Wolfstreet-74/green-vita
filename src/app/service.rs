@@ -20,6 +20,10 @@ pub(crate) struct Service {
     pub(crate) gamertag: Option<String>,
     pub(crate) gamerscore: Option<String>,
     pub(crate) logo: Arc<TitleImage>,
+    /// Highlighted title and when it was highlighted, so large art is only loaded once the
+    /// user stops scrolling.
+    pub(crate) highlighted_since: Option<(usize, std::time::Instant)>,
+    pub(crate) last_memory_log: Option<std::time::Instant>,
 }
 
 impl Service {
@@ -44,6 +48,8 @@ impl Service {
             gamertag: None,
             gamerscore: None,
             logo: image::load_bundled_logo(),
+            highlighted_since: None,
+            last_memory_log: None,
         }
     }
 

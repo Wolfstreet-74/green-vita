@@ -50,7 +50,7 @@ pub(super) fn release_reserved_decoder_cdram() {
     }
 }
 
-fn free_memory_summary() -> String {
+pub fn free_memory_summary() -> String {
     unsafe {
         let mut info = SceKernelFreeMemorySizeInfo {
             size: size_of::<SceKernelFreeMemorySizeInfo>() as i32,

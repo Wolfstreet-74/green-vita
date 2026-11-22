@@ -16,6 +16,18 @@ struct SdlEguiTexture {
     uv_scale: egui::Vec2,
 }
 
+impl SdlEguiTexture {
+    /// Frees the GPU memory now. With sdl2's `unsafe_textures` feature, dropping a `Texture`
+    /// does NOT free it: every catalog cover/background used to stay allocated until the app
+    /// ran out of memory while scrolling the game list.
+    fn destroy(self) {
+        // SAFETY: the painter is owned by the shell surface next to its canvas, so the parent
+        // renderer is alive whenever a texture is destroyed here, and the texture is not used
+        // after this call.
+        unsafe { self.texture.destroy() };
+    }
+}
+
 impl SdlEguiPainter {
     pub fn paint(
         &mut self,
@@ -63,7 +75,9 @@ impl SdlEguiPainter {
 
         canvas.set_clip_rect(None);
         for texture_id in &textures_delta.free {
-            self.textures.remove(texture_id);
+            if let Some(texture) = self.textures.remove(texture_id) {
+                texture.destroy();
+            }
             self.pending_textures.remove(texture_id);
         }
         self.pending_order
@@ -166,7 +180,7 @@ impl SdlEguiPainter {
                 )
                 .map_err(anyhow::Error::msg)
                 .context("failed to upload SDL egui texture")?;
-            textures.insert(
+            let replaced = textures.insert(
                 texture_id,
                 SdlEguiTexture {
                     texture,
@@ -176,6 +190,9 @@ impl SdlEguiPainter {
                     ),
                 },
             );
+            if let Some(old_texture) = replaced {
+                old_texture.destroy();
+            }
             return Ok(());
         }
 

@@ -4,8 +4,11 @@ use crate::api::catalog::worker::{CatalogResult, ImageKind, clear_catalog_cache}
 use crate::api::catalog::{Game, GameDetails};
 use std::sync::Arc;
 
-const ICON_CACHE_RADIUS: usize = 16;
+const ICON_CACHE_RADIUS: usize = 12;
 const RESULTS_PER_TICK: usize = 2;
+/// Cover and background are only fetched/decoded once a title stays highlighted this long, so
+/// holding the D-pad through the list does not queue dozens of large images.
+const ART_SETTLE_DELAY: std::time::Duration = std::time::Duration::from_millis(350);
 
 impl App {
     /// The pending-request set matching `kind`, so a fetch isn't re-queued while in flight.
@@ -60,6 +63,19 @@ impl App {
         if title.details.is_none() {
             self.request_metadata_if_needed(&title_id, title.metadata_id.clone(), false);
             return;
+        }
+
+        let now = std::time::Instant::now();
+        match self.service.highlighted_since {
+            Some((index, since)) if index == selected => {
+                if now.duration_since(since) < ART_SETTLE_DELAY {
+                    return;
+                }
+            }
+            _ => {
+                self.service.highlighted_since = Some((selected, now));
+                return;
+            }
         }
 
         let title = &self.service.titles[selected];
@@ -186,6 +202,27 @@ impl App {
     }
 
     pub(super) async fn pump_title_details(&mut self) -> anyhow::Result<()> {
+        let now = std::time::Instant::now();
+        if self
+            .service
+            .last_memory_log
+            .is_none_or(|last| now.duration_since(last) >= std::time::Duration::from_secs(20))
+        {
+            self.service.last_memory_log = Some(now);
+            let selected = match &self.state {
+                AppState::TitleList { selected } => *selected,
+                _ => 0,
+            };
+            crate::diag_log::log(
+                "memory",
+                format!(
+                    "game list: title {}/{} {}",
+                    selected + 1,
+                    self.service.titles.len(),
+                    crate::streaming::video::free_memory_summary()
+                ),
+            );
+        }
         self.prune_title_images();
         self.ensure_title_details_job();
         self.ensure_icon_prefetch_job();

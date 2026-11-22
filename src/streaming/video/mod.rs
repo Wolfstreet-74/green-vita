@@ -30,7 +30,7 @@ pub fn video_compat_mode() -> bool {
     VIDEO_COMPAT_MODE.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-pub use memory::reserve_decoder_cdram;
+pub use memory::{free_memory_summary, reserve_decoder_cdram};
 pub use metrics::video_performance_summary;
 pub(crate) use worker::NO_PICTURE_ERROR;
 pub use worker::VideoDecodeWorker;

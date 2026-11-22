@@ -146,9 +146,17 @@ impl VitaSurface {
 
     fn detach_direct_video_output(&mut self) {
         if let Some(output) = self.direct_video_output.take() {
+            // Waits for an in-progress decode into these textures before they are freed.
             output.clear_targets();
         }
-        self.video_textures = None;
+        if let Some(textures) = self.video_textures.take() {
+            for texture in textures {
+                // SAFETY: the canvas that created the textures is alive (owned by `self`), and
+                // the decoder no longer has their pointers after `clear_targets` above. Without
+                // this, `unsafe_textures` leaks both textures on every stream.
+                unsafe { texture.destroy() };
+            }
+        }
         self.displayed_video_texture = None;
         self.video_width = 0;
         self.video_height = 0;

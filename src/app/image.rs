@@ -1,8 +1,10 @@
-use std::sync::Arc;
 use std::sync::OnceLock;
+use std::sync::{Arc, Mutex};
 
 pub struct TitleImage {
-    rgba: Vec<u8>,
+    /// Pixels waiting for upload. Emptied once the egui texture exists, so each image is held
+    /// once (by the texture) instead of twice.
+    rgba: Mutex<Vec<u8>>,
     pub width: u32,
     pub height: u32,
     texture: OnceLock<egui::TextureHandle>,
@@ -11,7 +13,7 @@ pub struct TitleImage {
 impl TitleImage {
     pub fn new(rgba: Vec<u8>, width: u32, height: u32) -> Self {
         Self {
-            rgba,
+            rgba: Mutex::new(rgba),
             width,
             height,
             texture: OnceLock::new(),
@@ -20,14 +22,18 @@ impl TitleImage {
 
     pub fn texture(&self, ctx: &egui::Context, label: &'static str) -> &egui::TextureHandle {
         self.texture.get_or_init(|| {
-            ctx.load_texture(
-                label,
-                egui::ColorImage::from_rgba_unmultiplied(
-                    [self.width as usize, self.height as usize],
-                    &self.rgba,
-                ),
-                egui::TextureOptions::LINEAR,
-            )
+            let rgba = self
+                .rgba
+                .lock()
+                .map(|mut rgba| std::mem::take(&mut *rgba))
+                .unwrap_or_default();
+            let size = [self.width as usize, self.height as usize];
+            let image = if rgba.len() == size[0] * size[1] * 4 {
+                egui::ColorImage::from_rgba_unmultiplied(size, &rgba)
+            } else {
+                egui::ColorImage::new(size, egui::Color32::TRANSPARENT)
+            };
+            ctx.load_texture(label, image, egui::TextureOptions::LINEAR)
         })
     }
 }
@@ -47,12 +53,15 @@ pub(super) fn mask_to_circle(image: &mut TitleImage) {
     let (width, height) = (image.width as f32, image.height as f32);
     let (cx, cy) = (width / 2.0, height / 2.0);
     let radius = cx.min(cy);
+    let Ok(rgba) = image.rgba.get_mut() else {
+        return;
+    };
     for y in 0..image.height {
         for x in 0..image.width {
             let (dx, dy) = (x as f32 + 0.5 - cx, y as f32 + 0.5 - cy);
             if dx * dx + dy * dy > radius * radius {
                 let alpha_index = ((y * image.width + x) * 4 + 3) as usize;
-                image.rgba[alpha_index] = 0;
+                rgba[alpha_index] = 0;
             }
         }
     }

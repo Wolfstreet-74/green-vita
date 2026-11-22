@@ -10,6 +10,8 @@ use std::time::Duration;
 const MAX_PENDING_CATALOG_JOBS: usize = 4;
 const MAX_PENDING_PREFETCH_JOBS: usize = 4;
 const MAX_PENDING_CATALOG_RESULTS: usize = 8;
+const MAX_SOURCE_IMAGE_SIDE: u32 = 2048;
+const MAX_IMAGE_DECODE_BYTES: u64 = 12 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImageKind {
@@ -317,7 +319,17 @@ fn decode_image_rgba(
     max_height: u32,
     pad_to_bounds: bool,
 ) -> Result<(Vec<u8>, u32, u32)> {
-    let image = image::load_from_memory(bytes).context("failed to decode catalog image")?;
+    // Refuse huge images before decoding: the CDN occasionally ignores the resize query and a
+    // multi-megapixel original would need tens of MiB of RAM on the Vita.
+    let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()
+        .context("failed to detect catalog image format")?;
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(MAX_SOURCE_IMAGE_SIDE);
+    limits.max_image_height = Some(MAX_SOURCE_IMAGE_SIDE);
+    limits.max_alloc = Some(MAX_IMAGE_DECODE_BYTES);
+    reader.limits(limits);
+    let image = reader.decode().context("failed to decode catalog image")?;
     let rgba = image.to_rgba8();
     let (width, height) = rgba.dimensions();
     let scale = (max_width as f32 / width as f32)
