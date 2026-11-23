@@ -218,64 +218,88 @@ fn show_tab_bar(
                 }
                 let categories = categories(app);
                 let current = app.title_category.min(categories.len().saturating_sub(1));
-                if categories.len() > 1 {
-                    ui.colored_label(theme.text, egui::RichText::new("L").font(tab_font.clone()));
+                // Fixed slots: "L" | tabs (scroll sideways, clipped) | "R". Nothing can spill
+                // over the search button.
+                const SIDE_WIDTH: f32 = 14.0;
+                let show_shoulders = categories.len() > 1;
+                let mut shoulder = |ui: &mut egui::Ui, text: &str| {
+                    let (rect, _) = ui
+                        .allocate_exact_size(egui::vec2(SIDE_WIDTH, HEIGHT), egui::Sense::hover());
+                    ui.painter().text(
+                        rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        text,
+                        tab_font.clone(),
+                        theme.text,
+                    );
+                };
+                if show_shoulders {
+                    shoulder(ui, "L");
                 }
-                // Tabs scroll sideways when they do not all fit; the active one stays in view.
-                let scroll_width = (ui.available_width() - 16.0).max(0.0);
-                ui.allocate_ui_with_layout(
-                    egui::vec2(scroll_width, HEIGHT),
-                    egui::Layout::left_to_right(egui::Align::Center),
-                    |ui| {
-                        egui::ScrollArea::horizontal()
-                            .id_salt("title_tabs")
-                            .scroll_bar_visibility(
-                                egui::scroll_area::ScrollBarVisibility::AlwaysHidden,
-                            )
-                            .auto_shrink([true, true])
-                            .show(ui, |ui| {
-                                ui.horizontal(|ui| {
-                                    ui.spacing_mut().item_spacing.x = 6.0;
-                                    for (index, category) in categories.iter().enumerate() {
-                                        let active = index == current;
-                                        let name = match &category.label {
-                                            CategoryLabel::Text(id) => i18n.text(id),
-                                            CategoryLabel::Server(title) => title.clone(),
-                                        };
-                                        let label = format!("{name} ({})", category.indices.len());
-                                        let button = egui::Button::new(
-                                            egui::RichText::new(label)
-                                                .font(tab_font.clone())
-                                                .color(if active {
-                                                    egui::Color32::WHITE
-                                                } else {
-                                                    theme.text
-                                                }),
-                                        )
-                                        .fill(if active {
-                                            theme.accent
-                                        } else {
-                                            egui::Color32::from_rgb(0x26, 0x27, 0x2c)
-                                        })
-                                        .corner_radius(14.0)
-                                        .min_size(egui::vec2(0.0, HEIGHT - 4.0));
-                                        let response = ui.add(button);
-                                        if active {
-                                            response.scroll_to_me(Some(egui::Align::Center));
-                                        }
-                                        if response.clicked() {
-                                            commands.push(Command::SelectCategory(index).into());
-                                        }
-                                    }
-                                    if app.collections_loading() {
-                                        ui.spinner();
-                                    }
-                                });
-                            });
-                    },
+                let reserved = if show_shoulders {
+                    SIDE_WIDTH + ui.spacing().item_spacing.x
+                } else {
+                    0.0
+                };
+                let scroll_width = (ui.available_width() - reserved).max(0.0);
+                let (scroll_rect, _) =
+                    ui.allocate_exact_size(egui::vec2(scroll_width, HEIGHT), egui::Sense::hover());
+                let mut tabs_ui = ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(scroll_rect)
+                        .layout(egui::Layout::left_to_right(egui::Align::Center)),
                 );
-                if categories.len() > 1 {
-                    ui.colored_label(theme.text, egui::RichText::new("R").font(tab_font.clone()));
+                tabs_ui.set_clip_rect(scroll_rect);
+                egui::ScrollArea::horizontal()
+                    .id_salt("title_tabs")
+                    .max_width(scroll_width)
+                    .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                    .auto_shrink([false, true])
+                    .show(&mut tabs_ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 6.0;
+                            for (index, category) in categories.iter().enumerate() {
+                                let active = index == current;
+                                let name = match &category.label {
+                                    CategoryLabel::Text(id) => i18n.text(id),
+                                    CategoryLabel::Server(title) => title.clone(),
+                                };
+                                let label = format!("{name} ({})", category.indices.len());
+                                let button = egui::Button::new(
+                                    egui::RichText::new(label).font(tab_font.clone()).color(
+                                        if active {
+                                            egui::Color32::WHITE
+                                        } else {
+                                            theme.text
+                                        },
+                                    ),
+                                )
+                                .fill(if active {
+                                    theme.accent
+                                } else {
+                                    egui::Color32::from_rgb(0x26, 0x27, 0x2c)
+                                })
+                                .corner_radius(14.0)
+                                .min_size(egui::vec2(0.0, HEIGHT - 4.0));
+                                let response = ui.add(button);
+                                // Only when the tab changes, so a finger drag is not undone.
+                                let last_id = egui::Id::new("title_tabs_last_active");
+                                let last: Option<usize> = ui.data(|d| d.get_temp(last_id));
+                                if active && last != Some(index) {
+                                    response.scroll_to_me(Some(egui::Align::Center));
+                                    ui.data_mut(|d| d.insert_temp(last_id, index));
+                                }
+                                if response.clicked() {
+                                    commands.push(Command::SelectCategory(index).into());
+                                }
+                            }
+                            if app.collections_loading() {
+                                ui.spinner();
+                            }
+                        });
+                    });
+                if show_shoulders {
+                    shoulder(ui, "R");
                 }
             },
         );
@@ -424,7 +448,8 @@ fn draw_grid_cell(
         None => {
             // No cover yet (loading, or the game has none): show the name instead.
             let galley = layout_name(painter, name, rect.width() - 10.0, 4, 12.0, theme.text);
-            painter.galley(rect.center() - galley.size() / 2.0, galley, theme.text);
+            let pos = rect.center() - galley.rect.center().to_vec2();
+            painter.galley(pos, galley, theme.text);
         }
     }
 
@@ -454,14 +479,9 @@ fn draw_grid_cell(
                 },
                 egui::Color32::from_black_alpha(200),
             );
-            painter.galley(
-                egui::pos2(
-                    banner.center().x - galley.size().x / 2.0,
-                    banner.min.y + 4.0,
-                ),
-                galley,
-                egui::Color32::WHITE,
-            );
+            // Centered text: the galley's own rect is centered on x = 0, so place by its rect.
+            let pos = banner.center() - galley.rect.center().to_vec2();
+            painter.galley(pos, galley, egui::Color32::WHITE);
         }
         painter.rect_stroke(
             rect.expand(1.5),
