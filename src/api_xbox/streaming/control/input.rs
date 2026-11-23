@@ -31,6 +31,7 @@ pub struct InputPacket {
 
 impl InputPacket {
     pub fn new(sequence: u32) -> Self {
+        input_clock_epoch();
         Self {
             report_type: ReportType::None as u16,
             total_size: 14,
@@ -73,7 +74,15 @@ impl InputPacket {
         let mut bytes = Vec::with_capacity(self.total_size);
         push_le(&mut bytes, self.report_type.to_le_bytes());
         push_le(&mut bytes, self.sequence.to_le_bytes());
-        bytes.extend_from_slice(&(self.created_at.elapsed().as_secs_f64() * 1000.0).to_le_bytes());
+        // Like the web client's `performance.now()`: milliseconds on a clock that keeps
+        // running, so the server can tell how old each state is. It used to be the time since
+        // this packet was built, i.e. always about 0.
+        let timestamp_ms = self
+            .created_at
+            .duration_since(input_clock_epoch())
+            .as_secs_f64()
+            * 1000.0;
+        bytes.extend_from_slice(&timestamp_ms.to_le_bytes());
 
         if !self.gamepad_frames.is_empty() {
             self.write_gamepads(&mut bytes);
@@ -166,6 +175,11 @@ fn normalize_trigger(value: f32) -> u16 {
 fn normalize_axis(value: f32) -> i16 {
     let max = 32767.0;
     (value * max).clamp(-max, max) as i16
+}
+
+fn input_clock_epoch() -> Instant {
+    static EPOCH: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+    *EPOCH.get_or_init(Instant::now)
 }
 
 fn push_le<const N: usize>(bytes: &mut Vec<u8>, raw: [u8; N]) {

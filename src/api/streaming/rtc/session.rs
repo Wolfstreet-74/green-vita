@@ -155,15 +155,17 @@ impl<B: RtcSessionBackend> RtcSession<B> {
         if let Some(status) = self.video.status(now) {
             self.status = if let Some((width, height)) = self.backend.server_video_size() {
                 format!(
-                    "srv:{width}x{height} {status} kf:{} inskip:{}",
+                    "srv:{width}x{height} {status} kf:{} inskip:{} {}",
                     self.keyframe_requests,
-                    self.backend.skipped_input_packets()
+                    self.backend.skipped_input_packets(),
+                    sctp_status()
                 )
             } else {
                 format!(
-                    "srv:? {status} kf:{} inskip:{}",
+                    "srv:? {status} kf:{} inskip:{} {}",
                     self.keyframe_requests,
-                    self.backend.skipped_input_packets()
+                    self.backend.skipped_input_packets(),
+                    sctp_status()
                 )
             };
             // Keep the card log readable: first 10 reports, then one every 10 seconds.
@@ -299,4 +301,32 @@ impl<B: RtcSessionBackend> RtcSession<B> {
         self.backend.notify_keyframe_requested(&mut self.peer);
         self.video.request_keyframe(&mut self.peer);
     }
+}
+
+/// Data-channel transport state (SCTP): round trip / retransmission timeout in ms, congestion
+/// window, bytes in flight and waiting (now/peak), timeouts, fast retransmits, FORWARD-TSN
+/// (support y/n/?, sent) and stale input messages dropped before sending.
+fn sctp_status() -> String {
+    use rtc_sctp::debug_stats as d;
+    use std::sync::atomic::Ordering::Relaxed;
+    let forward_tsn = match d::FORWARD_TSN.load(Relaxed) {
+        1 => "y",
+        2 => "n",
+        _ => "?",
+    };
+    format!(
+        "sctp rtt:{} rto:{} cw:{} fl:{}/{} pd:{}/{} t3:{} fr:{} ft:{}{} st:{}",
+        d::SRTT_MS.load(Relaxed),
+        d::RTO_MS.load(Relaxed),
+        d::CWND.load(Relaxed),
+        d::INFLIGHT_BYTES.load(Relaxed),
+        d::take_inflight_peak(),
+        d::PENDING_BYTES.load(Relaxed),
+        d::take_pending_peak(),
+        d::T3_TIMEOUTS.load(Relaxed),
+        d::FAST_RETRANS.load(Relaxed),
+        forward_tsn,
+        d::FORWARD_TSN_SENT.load(Relaxed),
+        d::STALE_DROPPED.load(Relaxed),
+    )
 }
