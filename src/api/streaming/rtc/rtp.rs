@@ -647,9 +647,12 @@ impl VideoRtp {
         }
 
         if !worker.submit_access_unit(access_unit, self.source_frame_duration_us) {
-            eprintln!("Video decoder queue is full; continuing while requesting a keyframe");
+            eprintln!("Video decoder queue is full; requesting a keyframe");
             *keyframe_requested = true;
             stats.dropped = stats.dropped.saturating_add(1);
+            // The frames after this one reference it: freeze on the last clean picture (when
+            // the setting is on) instead of decoding them into blocky areas.
+            self.record_damage(worker);
         }
     }
 

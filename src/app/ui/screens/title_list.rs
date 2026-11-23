@@ -345,7 +345,10 @@ fn show_grid(
     theme: Theme,
     commands: &mut Vec<AppCommand>,
 ) {
-    let area = ui.available_rect_before_wrap();
+    // Covers are laid out with a small margin inside the clipped area, so the selection
+    // outline (drawn outside the cover) is never cut at the edges.
+    let clip_area = ui.available_rect_before_wrap();
+    let area = clip_area.shrink(6.0);
     let cell_width = (area.width() - GRID_GAP * (GRID_COLUMNS as f32 - 1.0)) / GRID_COLUMNS as f32;
     // Covers are 2:3 posters; shrink a little if needed so two full rows fit on screen.
     let cell_height = (cell_width * 1.5)
@@ -363,7 +366,7 @@ fn show_grid(
 
     // `click_and_drag` needs real movement before dragging, so it doesn't fight taps.
     let drag = ui.interact(
-        area,
+        clip_area,
         egui::Id::new("title_grid_drag"),
         egui::Sense::click_and_drag(),
     );
@@ -396,7 +399,7 @@ fn show_grid(
         commands.push(Command::SetVisible(visible.0, visible.1).into());
     }
 
-    let painter = ui.painter_at(area);
+    let painter = ui.painter_at(clip_area);
     for position in visible.0..visible.1 {
         let Some(title) = app.service.titles.get(grid[position]) else {
             continue;
@@ -413,7 +416,7 @@ fn show_grid(
         let is_selected = selected_position == Some(position);
         draw_grid_cell(ui, &painter, rect, title, is_selected, theme);
 
-        let hit_rect = rect.intersect(area);
+        let hit_rect = rect.intersect(clip_area);
         if hit_rect.is_positive() {
             let response = ui.interact(
                 hit_rect,
@@ -429,7 +432,7 @@ fn show_grid(
             }
         }
     }
-    ui.advance_cursor_after_rect(area);
+    ui.advance_cursor_after_rect(clip_area);
 }
 
 fn draw_grid_cell(

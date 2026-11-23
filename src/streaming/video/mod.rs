@@ -69,9 +69,12 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Condvar, Mutex, MutexGuard};
 use std::time::Duration;
 
-// Let a short render hitch absorb at most two 30 fps intervals. Together with the
-// frame already pending for presentation, this caps the microbuffer at three frames.
-const MAX_PENDING_TEXTURE_WAIT: Duration = Duration::from_millis(67);
+// How long the decoder waits for the screen to show the previous picture before decoding the
+// next one over it. It used to be 67 ms: the screen refreshes at ~40-55 fps while games send
+// ~60, so the decoder was paced by the screen, its queue overflowed and frames were thrown
+// away, which corrupts every following frame (blocky areas). Now the decoder keeps up with
+// the stream and a picture the screen had no time to show is simply replaced.
+const MAX_PENDING_TEXTURE_WAIT: Duration = Duration::from_millis(4);
 
 #[derive(Clone, Copy)]
 pub(crate) struct VideoTextureTarget {
