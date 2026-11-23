@@ -1,4 +1,5 @@
 use crate::Stream;
+use crate::api::streaming::rtc::peer::PeerConnection as RTCPeerConnection;
 use crate::api::streaming::rtc::session::RtcSessionConfig;
 use crate::api::streaming::rtc::worker::{RtcWorker, RtcWorkerProvider};
 use crate::api_xbox::streaming::rtc::protocol::XboxRtcProtocol;
@@ -6,7 +7,6 @@ use crate::api_xbox::streaming::rtc::{AUDIO_PAYLOAD_TYPE, ROUTE_PROBE, STUN_SERV
 use crate::streaming::audio::AUDIO_SAMPLE_RATE;
 use crate::streaming::video::{DecoderConfig, HW_OUTPUT_HEIGHT, HW_OUTPUT_WIDTH};
 use anyhow::Result;
-use rtc::peer_connection::RTCPeerConnection;
 use rtc::peer_connection::sdp::RTCSessionDescription;
 
 struct XboxRtcWorkerProvider {

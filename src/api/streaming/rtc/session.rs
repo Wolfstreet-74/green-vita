@@ -1,9 +1,9 @@
 use crate::api::streaming::rtc::media::{AudioReceiver, VideoReceiver};
+use crate::api::streaming::rtc::peer::PeerConnection as RTCPeerConnection;
 use crate::api::streaming::rtc::transport::RtcTransport;
 use crate::streaming::input::{GamepadFrame, PointerEvent};
 use crate::streaming::video::{DecoderConfig, DirectVideoOutput};
 use anyhow::{Context, Result};
-use rtc::peer_connection::RTCPeerConnection;
 use rtc::peer_connection::event::{RTCDataChannelEvent, RTCPeerConnectionEvent, RTCTrackEvent};
 use rtc::peer_connection::message::RTCMessage;
 use rtc::peer_connection::sdp::RTCSessionDescription;

@@ -1,9 +1,9 @@
+use crate::api::streaming::rtc::peer::PeerConnection as RTCPeerConnection;
 use crate::api::streaming::rtc::rtp;
 use crate::streaming::video::{DecodedFrame, DecoderConfig, DirectVideoOutput, VideoDecodeWorker};
 use anyhow::Result;
 use bytes::Bytes;
 use rtc::media_stream::MediaStreamTrackId;
-use rtc::peer_connection::RTCPeerConnection;
 use rtc::rtp::Packet;
 use rtc::rtp_transceiver::RTCRtpReceiverId;
 use std::sync::Arc;
@@ -143,8 +143,9 @@ impl VideoReceiver {
             .map(|(width, height)| format!("{width}x{height}"))
             .unwrap_or_else(|| "?".to_owned());
         let decoder = self.rtp.decoder_config();
+        let (late_packets, recovered_frames) = self.rtp.recovery_counters();
         Some(format!(
-            "enc:{encoded_resolution} dec:{}x{}/r{} srcfps:{source_fps} {performance} wait:{} drop:{} err:{}",
+            "enc:{encoded_resolution} dec:{}x{}/r{} srcfps:{source_fps} {performance} wait:{} drop:{} err:{} fix:{recovered_frames} late:{late_packets}",
             decoder.decode_width,
             decoder.decode_height,
             decoder.ref_frames,
