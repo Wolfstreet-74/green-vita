@@ -46,7 +46,7 @@ pub fn video_quality() -> crate::settings::VideoQuality {
 /// "Freeze picture on packet loss" from the settings: after a lost frame, keep showing the last
 /// clean picture until the next keyframe instead of decoding frames that reference the broken
 /// one (which shows as blocky, smeared areas).
-static FREEZE_ON_LOSS: AtomicBool = AtomicBool::new(true);
+static FREEZE_ON_LOSS: AtomicBool = AtomicBool::new(false);
 
 pub fn set_freeze_on_loss(enabled: bool) {
     FREEZE_ON_LOSS.store(enabled, std::sync::atomic::Ordering::Relaxed);

@@ -76,7 +76,7 @@ fn settings_rows(app: &App) -> Vec<SettingsRow> {
         app.settings.show_stream_debug_info,
     ));
     rows.push(SettingsRow::VideoQuality(app.settings.video_quality));
-    rows.push(SettingsRow::VideoFreeze(app.settings.video_freeze_on_loss));
+    rows.push(SettingsRow::VideoFreeze(app.settings.freeze_picture_on_loss));
     rows.push(SettingsRow::VideoCompat(app.settings.video_compat_mode));
     rows.push(SettingsRow::Back);
     rows
@@ -256,11 +256,11 @@ pub(crate) fn show(ctx: &egui::Context, app: &App, commands: &mut Vec<AppCommand
                 if checkbox_row(
                     ui,
                     selected_index == row_index,
-                    app.settings.video_freeze_on_loss,
+                    app.settings.freeze_picture_on_loss,
                     i18n.text("settings-video-freeze"),
                 ) {
                     commands.push(
-                        Command::SetVideoFreezeOnLoss(!app.settings.video_freeze_on_loss).into(),
+                        Command::SetVideoFreezeOnLoss(!app.settings.freeze_picture_on_loss).into(),
                     );
                 }
                 row_index += 1;
@@ -532,7 +532,7 @@ impl App {
                 self.settings.save();
             }
             Command::SetVideoFreezeOnLoss(enabled) => {
-                self.settings.video_freeze_on_loss = enabled;
+                self.settings.freeze_picture_on_loss = enabled;
                 crate::streaming::video::set_freeze_on_loss(enabled);
                 self.settings.save();
             }

@@ -148,8 +148,10 @@ pub struct Settings {
     pub video_compat_mode: bool,
     pub video_quality: VideoQuality,
     /// After a lost video frame, keep the last clean picture until the next keyframe
-    /// instead of showing corrupted blocks. On by default.
-    pub video_freeze_on_loss: bool,
+    /// instead of decoding on. Off by default: xCloud does not resend lost packets, so each
+    /// loss froze the picture until a keyframe (hundreds of ms) and play felt delayed.
+    /// (Renamed from `video_freeze_on_loss`, which was on by default, so it resets to off.)
+    pub freeze_picture_on_loss: bool,
     pub game_profiles: HashMap<String, GameProfile>,
     /// Games started from this Vita, newest first (the "recently played" tab).
     pub recent_titles: Vec<String>,
@@ -183,7 +185,7 @@ impl Default for Settings {
             show_stream_debug_info: false,
             video_compat_mode: false,
             video_quality: VideoQuality::default(),
-            video_freeze_on_loss: true,
+            freeze_picture_on_loss: false,
             game_profiles: HashMap::new(),
             recent_titles: Vec::new(),
         }
