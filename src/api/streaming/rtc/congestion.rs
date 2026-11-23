@@ -13,9 +13,10 @@ use std::time::{Duration, Instant};
 const VIDEO_CLOCK_KHZ: f64 = 90.0;
 /// How often the estimate is updated and sent.
 pub(crate) const REMB_INTERVAL: Duration = Duration::from_millis(250);
-/// Width of one bucket of the base-delay minimum, and how many are kept (clock drift).
+/// Width of one bucket of the base-delay minimum, and how many are kept: 10 minutes, so a
+/// delay that stays high is still shown (a 30 s window hid it).
 const BASE_BUCKET: Duration = Duration::from_secs(1);
-const BASE_BUCKETS: usize = 30;
+const BASE_BUCKETS: usize = 600;
 /// Queuing delay floor above which the link is considered overused.
 const OVERUSE_MS: f64 = 100.0;
 /// Below this the link is considered clear and the estimate may grow.

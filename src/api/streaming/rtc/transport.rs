@@ -13,6 +13,9 @@ pub(crate) struct RtcTransport {
     pub(crate) socket: UdpSocket,
     local_addr: SocketAddr,
     recv_buf: Vec<u8>,
+    /// Most UDP packets read in one go since the last report. A large number means packets
+    /// were waiting in the Vita's socket buffer, i.e. the Vita reads too slowly.
+    pub(crate) max_batch: u32,
 }
 
 impl RtcTransport {
@@ -49,6 +52,7 @@ impl RtcTransport {
             socket,
             local_addr,
             recv_buf: vec![0u8; 2048],
+            max_batch: 0,
         })
     }
 
@@ -68,9 +72,11 @@ impl RtcTransport {
     }
 
     pub(crate) fn receive(&mut self, peer: &mut RTCPeerConnection) {
+        let mut batch = 0u32;
         loop {
             match self.socket.try_recv_from(&mut self.recv_buf) {
                 Ok((n, peer_addr)) => {
+                    batch += 1;
                     if let Err(error) = peer.handle_read(TaggedBytesMut {
                         now: Instant::now(),
                         transport: TransportContext {
@@ -91,5 +97,6 @@ impl RtcTransport {
                 }
             }
         }
+        self.max_batch = self.max_batch.max(batch);
     }
 }

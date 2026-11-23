@@ -70,6 +70,15 @@ pub(crate) struct RtcSession<B: RtcSessionBackend> {
     last_initial_video_keyframe_request: Option<Instant>,
     pub status: String,
     status_reports: u64,
+    pump_load: PumpLoad,
+}
+
+#[derive(Default)]
+struct PumpLoad {
+    window_start: Option<Instant>,
+    last_start: Option<Instant>,
+    max_gap: Duration,
+    busy: Duration,
 }
 
 impl<B: RtcSessionBackend> RtcSession<B> {
@@ -96,6 +105,7 @@ impl<B: RtcSessionBackend> RtcSession<B> {
             last_initial_video_keyframe_request: None,
             status: "Negotiating WebRTC connection".to_owned(),
             status_reports: 0,
+            pump_load: PumpLoad::default(),
         })
     }
 
@@ -130,6 +140,18 @@ impl<B: RtcSessionBackend> RtcSession<B> {
     }
 
     pub async fn pump(&mut self) -> Result<Vec<RTCIceCandidateInit>> {
+        let pump_started = Instant::now();
+        if let Some(previous) = self.pump_load.last_start {
+            let gap = pump_started.duration_since(previous);
+            self.pump_load.max_gap = self.pump_load.max_gap.max(gap);
+        }
+        self.pump_load.last_start = Some(pump_started);
+        let result = self.pump_inner().await;
+        self.pump_load.busy += pump_started.elapsed();
+        result
+    }
+
+    async fn pump_inner(&mut self) -> Result<Vec<RTCIceCandidateInit>> {
         self.transport.flush(&mut self.peer).await;
         self.transport.receive(&mut self.peer);
         let gathered_candidates = self.handle_peer_events();
@@ -153,19 +175,22 @@ impl<B: RtcSessionBackend> RtcSession<B> {
         self.request_keyframe(keyframe_requested, now);
         self.video.send_bandwidth_estimate(&mut self.peer, now);
         if let Some(status) = self.video.status(now) {
+            let local_status = self.take_local_status(now);
             self.status = if let Some((width, height)) = self.backend.server_video_size() {
                 format!(
-                    "srv:{width}x{height} {status} kf:{} inskip:{} {}",
+                    "srv:{width}x{height} {status} kf:{} inskip:{} {} {}",
                     self.keyframe_requests,
                     self.backend.skipped_input_packets(),
-                    sctp_status()
+                    sctp_status(),
+                    local_status
                 )
             } else {
                 format!(
-                    "srv:? {status} kf:{} inskip:{} {}",
+                    "srv:? {status} kf:{} inskip:{} {} {}",
                     self.keyframe_requests,
                     self.backend.skipped_input_packets(),
-                    sctp_status()
+                    sctp_status(),
+                    local_status
                 )
             };
             // Keep the card log readable: first 10 reports, then one every 10 seconds.
@@ -178,6 +203,25 @@ impl<B: RtcSessionBackend> RtcSession<B> {
         }
 
         Ok(gathered_candidates)
+    }
+
+    /// How busy the Vita is with the network: "vita b:" most UDP packets read at once,
+    /// "g:" longest pause between two reads (ms), "cpu:" share of time spent reading and
+    /// processing them (%).
+    fn take_local_status(&mut self, now: Instant) -> String {
+        let load = std::mem::take(&mut self.pump_load);
+        let window = load
+            .window_start
+            .map_or(Duration::from_secs(1), |start| now.duration_since(start));
+        let busy_percent =
+            (load.busy.as_secs_f64() / window.as_secs_f64().max(0.001) * 100.0).min(999.0) as u32;
+        self.pump_load.window_start = Some(now);
+        self.pump_load.last_start = load.last_start;
+        let max_batch = std::mem::take(&mut self.transport.max_batch);
+        format!(
+            "vita b:{max_batch} g:{} cpu:{busy_percent}",
+            load.max_gap.as_millis()
+        )
     }
 
     fn initial_video_keyframe_due(&mut self, now: Instant) -> bool {
