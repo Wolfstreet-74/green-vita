@@ -144,8 +144,9 @@ impl VideoReceiver {
             .unwrap_or_else(|| "?".to_owned());
         let decoder = self.rtp.decoder_config();
         let (late_packets, recovered_frames) = self.rtp.recovery_counters();
+        let (lost_packets, freezes) = self.rtp.loss_counters();
         Some(format!(
-            "enc:{encoded_resolution} dec:{}x{}/r{} srcfps:{source_fps} {performance} wait:{} drop:{} err:{} fix:{recovered_frames} late:{late_packets}",
+            "enc:{encoded_resolution} dec:{}x{}/r{} srcfps:{source_fps} {performance} wait:{} drop:{} err:{} fix:{recovered_frames} late:{late_packets} lost:{lost_packets} frz:{freezes}",
             decoder.decode_width,
             decoder.decode_height,
             decoder.ref_frames,

@@ -53,6 +53,8 @@ pub(crate) struct RtcSession<B: RtcSessionBackend> {
     pub(crate) video: VideoReceiver,
     pub(crate) audio: AudioReceiver,
     last_keyframe_request: Option<Instant>,
+    /// Keyframes asked of the server since the stream started.
+    keyframe_requests: u64,
     initial_video_watchdog_started_at: Option<Instant>,
     last_initial_video_keyframe_request: Option<Instant>,
     pub status: String,
@@ -78,6 +80,7 @@ impl<B: RtcSessionBackend> RtcSession<B> {
             video,
             audio: AudioReceiver::new(config.audio_sample_rate, config.audio_payload_type),
             last_keyframe_request: None,
+            keyframe_requests: 0,
             initial_video_watchdog_started_at: None,
             last_initial_video_keyframe_request: None,
             status: "Negotiating WebRTC connection".to_owned(),
@@ -139,9 +142,12 @@ impl<B: RtcSessionBackend> RtcSession<B> {
         self.request_keyframe(keyframe_requested, now);
         if let Some(status) = self.video.status(now) {
             self.status = if let Some((width, height)) = self.backend.server_video_size() {
-                format!("srv:{width}x{height} {status}")
+                format!(
+                    "srv:{width}x{height} {status} kf:{}",
+                    self.keyframe_requests
+                )
             } else {
-                format!("srv:? {status}")
+                format!("srv:? {status} kf:{}", self.keyframe_requests)
             };
             // Keep the card log readable: first 10 reports, then one every 10 seconds.
             self.status_reports += 1;
@@ -262,6 +268,7 @@ impl<B: RtcSessionBackend> RtcSession<B> {
         }
 
         self.last_keyframe_request = Some(now);
+        self.keyframe_requests = self.keyframe_requests.saturating_add(1);
         self.backend.notify_keyframe_requested(&mut self.peer);
         self.video.request_keyframe(&mut self.peer);
     }

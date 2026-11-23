@@ -42,6 +42,7 @@ impl App {
         let settings = Settings::load();
         crate::streaming::video::set_video_compat_mode(settings.video_compat_mode);
         crate::streaming::video::set_video_quality(settings.video_quality);
+        crate::streaming::video::set_freeze_on_loss(settings.video_freeze_on_loss);
         let service = Service::new(settings.locale.as_str());
 
         Ok(Self {

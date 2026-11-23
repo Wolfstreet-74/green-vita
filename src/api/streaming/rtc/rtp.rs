@@ -94,6 +94,11 @@ pub(super) struct VideoRtp {
     cached_sps_nal: Option<Vec<u8>>,
     cached_pps_nal: Option<Vec<u8>>,
     parameter_sets_reinjected: u64,
+    /// Highest RTP sequence number seen, to count gaps (packets lost before any resend).
+    highest_sequence: Option<u16>,
+    lost_packets: u64,
+    /// Times the picture was frozen on the last clean frame to wait for a keyframe.
+    freezes: u64,
 }
 
 /// The parts of an H.264 SPS that matter for the Vita hardware decoder.
@@ -258,6 +263,9 @@ impl VideoRtp {
             cached_sps_nal: None,
             cached_pps_nal: None,
             parameter_sets_reinjected: 0,
+            highest_sequence: None,
+            lost_packets: 0,
+            freezes: 0,
         }
     }
 
@@ -268,6 +276,26 @@ impl VideoRtp {
     /// `(late packets, frames completed after waiting)` since the stream started.
     pub(super) fn recovery_counters(&self) -> (u64, u64) {
         (self.late_packets, self.recovered_frames)
+    }
+
+    /// `(packets missing on arrival, picture freezes)` since the stream started.
+    pub(super) fn loss_counters(&self) -> (u64, u64) {
+        (self.lost_packets, self.freezes)
+    }
+
+    fn count_sequence_gap(&mut self, sequence: u16) {
+        let Some(highest) = self.highest_sequence else {
+            self.highest_sequence = Some(sequence);
+            return;
+        };
+        let ahead = sequence.wrapping_sub(highest);
+        // Newer packet (allowing wrap-around); older ones are resends or reordered packets.
+        if ahead != 0 && ahead < 0x8000 {
+            if ahead < 1000 {
+                self.lost_packets = self.lost_packets.saturating_add(u64::from(ahead - 1));
+            }
+            self.highest_sequence = Some(sequence);
+        }
     }
 
     /// Called for every picture the hardware decoder outputs.
@@ -354,6 +382,7 @@ impl VideoRtp {
         keyframe_requested: &mut bool,
     ) -> VideoSampleStats {
         let mut stats = VideoSampleStats::default();
+        self.count_sequence_gap(packet.header.sequence_number);
         if packet.payload.is_empty() {
             // Padding (bandwidth probing). Remember it so a frame that follows it is not
             // considered to have a missing first packet.
@@ -626,6 +655,17 @@ impl VideoRtp {
 
     fn record_damage(&mut self, worker: &VideoDecodeWorker) {
         if self.waiting_for_keyframe {
+            return;
+        }
+
+        if crate::streaming::video::freeze_on_loss() {
+            // Frames after a lost one reference a broken picture: decoding them shows blocky,
+            // smeared areas. Keep the last clean picture on screen until a keyframe arrives
+            // (one is requested right away by the caller).
+            worker.begin_resync();
+            self.waiting_for_keyframe = true;
+            self.damage_score = 0;
+            self.freezes = self.freezes.saturating_add(1);
             return;
         }
 

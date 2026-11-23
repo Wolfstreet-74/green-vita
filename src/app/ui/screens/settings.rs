@@ -17,6 +17,7 @@ pub enum Command {
     SetFrontTouchAuxiliaryButtons { title_id: String, enabled: bool },
     SetShowStreamDebugInfo(bool),
     SetVideoCompatMode(bool),
+    SetVideoFreezeOnLoss(bool),
     SetVideoQuality(crate::settings::VideoQuality),
 }
 
@@ -29,6 +30,7 @@ enum SettingsRow {
     GameFrontTouchAuxiliary { title_id: String, enabled: bool },
     StreamDebug(bool),
     VideoCompat(bool),
+    VideoFreeze(bool),
     VideoQuality(crate::settings::VideoQuality),
     Back,
 }
@@ -74,6 +76,7 @@ fn settings_rows(app: &App) -> Vec<SettingsRow> {
         app.settings.show_stream_debug_info,
     ));
     rows.push(SettingsRow::VideoQuality(app.settings.video_quality));
+    rows.push(SettingsRow::VideoFreeze(app.settings.video_freeze_on_loss));
     rows.push(SettingsRow::VideoCompat(app.settings.video_compat_mode));
     rows.push(SettingsRow::Back);
     rows
@@ -253,6 +256,19 @@ pub(crate) fn show(ctx: &egui::Context, app: &App, commands: &mut Vec<AppCommand
                 if checkbox_row(
                     ui,
                     selected_index == row_index,
+                    app.settings.video_freeze_on_loss,
+                    i18n.text("settings-video-freeze"),
+                ) {
+                    commands.push(
+                        Command::SetVideoFreezeOnLoss(!app.settings.video_freeze_on_loss).into(),
+                    );
+                }
+                row_index += 1;
+                ui.colored_label(theme.text, i18n.text("settings-video-freeze-hint"));
+
+                if checkbox_row(
+                    ui,
+                    selected_index == row_index,
                     app.settings.video_compat_mode,
                     i18n.text("settings-video-compat-mode"),
                 ) {
@@ -426,6 +442,9 @@ impl App {
             SettingsRow::StreamDebug(enabled) => {
                 return self.handle_settings_command(Command::SetShowStreamDebugInfo(!enabled));
             }
+            SettingsRow::VideoFreeze(enabled) => {
+                return self.handle_settings_command(Command::SetVideoFreezeOnLoss(!enabled));
+            }
             SettingsRow::VideoCompat(enabled) => {
                 return self.handle_settings_command(Command::SetVideoCompatMode(!enabled));
             }
@@ -510,6 +529,11 @@ impl App {
             Command::SetVideoQuality(quality) => {
                 self.settings.video_quality = quality;
                 crate::streaming::video::set_video_quality(quality);
+                self.settings.save();
+            }
+            Command::SetVideoFreezeOnLoss(enabled) => {
+                self.settings.video_freeze_on_loss = enabled;
+                crate::streaming::video::set_freeze_on_loss(enabled);
                 self.settings.save();
             }
             Command::SetVideoCompatMode(enabled) => {
