@@ -151,6 +151,7 @@ impl<B: RtcSessionBackend> RtcSession<B> {
             keyframe_requested = true;
         }
         self.request_keyframe(keyframe_requested, now);
+        self.video.send_bandwidth_estimate(&mut self.peer, now);
         if let Some(status) = self.video.status(now) {
             self.status = if let Some((width, height)) = self.backend.server_video_size() {
                 format!(

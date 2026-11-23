@@ -1,3 +1,4 @@
+use crate::api::streaming::rtc::congestion::BandwidthEstimator;
 use crate::api::streaming::rtc::peer::PeerConnection as RTCPeerConnection;
 use crate::api::streaming::rtc::rtp;
 use crate::streaming::video::{DecodedFrame, DecoderConfig, DirectVideoOutput, VideoDecodeWorker};
@@ -30,6 +31,7 @@ pub(crate) struct VideoReceiver {
     pub(crate) received_packet: bool,
     last_stats_report: Instant,
     stats: VideoStats,
+    bandwidth: BandwidthEstimator,
 }
 
 impl VideoReceiver {
@@ -48,6 +50,7 @@ impl VideoReceiver {
             received_packet: false,
             last_stats_report: Instant::now(),
             stats: VideoStats::default(),
+            bandwidth: BandwidthEstimator::new(Instant::now()),
         })
     }
 
@@ -68,6 +71,11 @@ impl VideoReceiver {
 
     pub(crate) fn receive(&mut self, packet: Packet, keyframe_requested: &mut bool) {
         self.received_packet = true;
+        self.bandwidth.on_packet(
+            Instant::now(),
+            packet.header.timestamp,
+            packet.payload.len(),
+        );
         let sample_stats = self.rtp.receive(&self.decoder, packet, keyframe_requested);
         self.stats.dropped = self
             .stats
@@ -124,6 +132,23 @@ impl VideoReceiver {
         }
     }
 
+    /// Sends the receive-side bandwidth estimate (REMB) when one is due.
+    pub(crate) fn send_bandwidth_estimate(&mut self, peer: &mut RTCPeerConnection, now: Instant) {
+        let Some(bitrate) = self.bandwidth.poll(now) else {
+            return;
+        };
+        if let (Some(receiver_id), Some(ssrc)) = (self.receiver_id, self.ssrc)
+            && let Some(mut receiver) = peer.rtp_receiver(receiver_id)
+        {
+            let remb = rtcp::payload_feedbacks::receiver_estimated_maximum_bitrate::ReceiverEstimatedMaximumBitrate {
+                sender_ssrc: 0,
+                bitrate: bitrate as f32,
+                ssrcs: vec![ssrc],
+            };
+            let _ = receiver.write_rtcp(vec![Box::new(remb)]);
+        }
+    }
+
     pub(crate) fn status(&mut self, now: Instant) -> Option<String> {
         if now.duration_since(self.last_stats_report) < STREAM_STATS_INTERVAL {
             return None;
@@ -146,13 +171,18 @@ impl VideoReceiver {
         let (late_packets, recovered_frames) = self.rtp.recovery_counters();
         let (lost_packets, freezes) = self.rtp.loss_counters();
         Some(format!(
-            "enc:{encoded_resolution} dec:{}x{}/r{} srcfps:{source_fps} {performance} wait:{} drop:{} err:{} fix:{recovered_frames} late:{late_packets} lost:{lost_packets} frz:{freezes}",
+            "enc:{encoded_resolution} dec:{}x{}/r{} srcfps:{source_fps} {performance} wait:{} drop:{} err:{} fix:{recovered_frames} late:{late_packets} lost:{lost_packets} frz:{freezes} qd:{}/{} rx:{} remb:{}/{}",
             decoder.decode_width,
             decoder.decode_height,
             decoder.ref_frames,
             u8::from(self.rtp.waiting_for_keyframe()),
             self.stats.dropped,
             self.stats.decode_errors,
+            self.bandwidth.queue_delay_ms as u64,
+            self.bandwidth.queue_delay_peak_ms as u64,
+            self.bandwidth.incoming_kbps(),
+            self.bandwidth.estimate_kbps(),
+            self.bandwidth.overuse_events,
         ))
     }
 }
