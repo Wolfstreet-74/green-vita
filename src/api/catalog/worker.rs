@@ -4,10 +4,11 @@ use super::{GameCatalogBackend, GameDetails, cache};
 use anyhow::{Context, Result};
 use crossbeam_channel::{Receiver, Sender, TrySendError, bounded, select_biased};
 use reqwest::Client;
-use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::time::Duration;
 
 const MAX_PENDING_CATALOG_JOBS: usize = 4;
+/// Jobs run at the same time (network requests overlap; decoding stays on this thread).
+const PARALLEL_JOBS: usize = 3;
 const MAX_PENDING_PREFETCH_JOBS: usize = 4;
 const MAX_PENDING_CATALOG_RESULTS: usize = 8;
 const MAX_SOURCE_IMAGE_SIDE: u32 = 2048;
@@ -230,16 +231,30 @@ impl CatalogWorker {
                 let Ok(job) = job else {
                     break;
                 };
-                let outcome = catch_unwind(AssertUnwindSafe(|| {
-                    runtime.block_on(job.run(&client, &backend))
-                }));
-                let results = match outcome {
-                    Ok(results) => results,
-                    Err(_) => {
-                        eprintln!("Catalog worker: job panicked; continuing");
-                        continue;
+                // Run up to `PARALLEL_JOBS` at once: on 4G most of the time is network latency.
+                let mut batch = vec![job];
+                while batch.len() < PARALLEL_JOBS {
+                    match job_rx.try_recv().or_else(|_| prefetch_rx.try_recv()) {
+                        Ok(job) => batch.push(job),
+                        Err(_) => break,
                     }
-                };
+                }
+                let results = runtime.block_on(async {
+                    let mut set = tokio::task::JoinSet::new();
+                    for job in batch {
+                        let client = client.clone();
+                        let backend = backend.clone();
+                        set.spawn(async move { job.run(&client, &backend).await });
+                    }
+                    let mut results = Vec::new();
+                    while let Some(outcome) = set.join_next().await {
+                        match outcome {
+                            Ok(job_results) => results.extend(job_results),
+                            Err(_) => eprintln!("Catalog worker: job panicked; continuing"),
+                        }
+                    }
+                    results
+                });
                 if results
                     .into_iter()
                     .any(|result| result_tx.send(result).is_err())

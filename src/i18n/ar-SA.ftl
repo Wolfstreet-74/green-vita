@@ -42,6 +42,7 @@ title-play = ▶ العب
 title-no-description = لا يوجد وصف متاح
 title-search = البحث عن الألعاب...
 title-search-empty = لم يتم العثور على ألعاب
+title-category-recent = Recently played
 title-category-all = All games
 title-category-results = Results
 screen-language-select = اللغة

@@ -42,6 +42,7 @@ title-play = ▶ SPELA
 title-no-description = Ingen beskrivning tillgänglig
 title-search = Sök efter spel...
 title-search-empty = Inga spel hittades
+title-category-recent = Recently played
 title-category-all = All games
 title-category-results = Results
 screen-language-select = SPRÅK

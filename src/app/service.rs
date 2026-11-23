@@ -26,6 +26,12 @@ pub(crate) struct Service {
     /// user stops scrolling.
     pub(crate) highlighted_since: Option<(usize, std::time::Instant)>,
     pub(crate) last_memory_log: Option<std::time::Instant>,
+    /// Game Pass lists shown as grid tabs (popular, new, leaving soon).
+    pub(crate) collections: Vec<super::collections::Collection>,
+    /// xCloud's own "recently played" title ids, newest first.
+    pub(crate) server_recent_title_ids: Vec<String>,
+    pub(crate) collections_job:
+        Option<tokio::task::JoinHandle<anyhow::Result<super::collections::FetchedCollections>>>,
 }
 
 impl Service {
@@ -53,6 +59,9 @@ impl Service {
             logo: image::load_bundled_logo(),
             highlighted_since: None,
             last_memory_log: None,
+            collections: Vec::new(),
+            server_recent_title_ids: Vec::new(),
+            collections_job: None,
         }
     }
 
@@ -60,6 +69,9 @@ impl Service {
         self.auth.logout();
         self.titles.clear();
         self.consoles.clear();
+        self.collections.clear();
+        self.server_recent_title_ids.clear();
+        self.collections_job = None;
         self.avatar = None;
         self.gamertag = None;
         self.gamerscore = None;

@@ -49,6 +49,7 @@ title-play = ▶ PLAY
 title-no-description = No description available
 title-search = Search games...
 title-search-empty = No games found
+title-category-recent = Recently played
 title-category-all = All games
 title-category-results = Results
 screen-language-select = LANGUAGE

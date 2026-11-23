@@ -148,6 +148,8 @@ pub struct Settings {
     pub video_compat_mode: bool,
     pub video_quality: VideoQuality,
     pub game_profiles: HashMap<String, GameProfile>,
+    /// Games started from this Vita, newest first (the "recently played" tab).
+    pub recent_titles: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -179,6 +181,7 @@ impl Default for Settings {
             video_compat_mode: false,
             video_quality: VideoQuality::default(),
             game_profiles: HashMap::new(),
+            recent_titles: Vec::new(),
         }
     }
 }

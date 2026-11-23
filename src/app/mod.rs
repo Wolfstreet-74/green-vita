@@ -1,3 +1,4 @@
+mod collections;
 pub mod command;
 mod entry;
 mod image;

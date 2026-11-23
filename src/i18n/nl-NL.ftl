@@ -42,6 +42,7 @@ title-play = ▶ SPELEN
 title-no-description = Geen beschrijving beschikbaar
 title-search = Games zoeken...
 title-search-empty = Geen games gevonden
+title-category-recent = Recent gespeeld
 title-category-all = Alle games
 title-category-results = Resultaten
 screen-language-select = TAAL

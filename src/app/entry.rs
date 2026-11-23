@@ -199,6 +199,14 @@ impl App {
                 self.title_grid_visible = (0, 0);
                 self.title_category = 0;
                 self.set_state(AppState::TitleList { selected: 0 });
+                self.start_collections_job();
+                // Open on the first tab (recently played when there is a history).
+                if let Some(first) =
+                    super::ui::screens::title_list::grid_title_indices(self).first()
+                    && let AppState::TitleList { selected } = &mut self.state
+                {
+                    *selected = *first;
+                }
             }
             PollJob::Done(Err(error)) => {
                 self.set_localized_error_screen("error-title-request", format!("{error:#}"));

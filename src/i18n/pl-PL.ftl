@@ -42,6 +42,7 @@ title-play = ▶ GRAJ
 title-no-description = Brak opisu
 title-search = Szukaj gier...
 title-search-empty = Nie znaleziono gier
+title-category-recent = Recently played
 title-category-all = All games
 title-category-results = Results
 screen-language-select = JĘZYK

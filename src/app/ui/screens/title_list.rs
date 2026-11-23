@@ -29,18 +29,45 @@ pub enum Command {
     SetVisible(usize, usize),
 }
 
+pub(crate) enum CategoryLabel {
+    /// Translation id.
+    Text(&'static str),
+    /// Title given by the server, already translated.
+    Server(String),
+}
+
 /// One tab of the game grid.
 pub(crate) struct Category {
-    pub(crate) label_key: &'static str,
+    pub(crate) key: &'static str,
+    pub(crate) label: CategoryLabel,
     /// Indices into `service.titles`, in display order.
     pub(crate) indices: Vec<usize>,
 }
 
+/// Tabs in order: recently played (if any), the Game Pass lists that loaded, all games.
 pub(crate) fn categories(app: &App) -> Vec<Category> {
-    vec![Category {
-        label_key: "title-category-all",
+    let mut categories = Vec::new();
+    let recent = app.recent_title_indices();
+    if !recent.is_empty() {
+        categories.push(Category {
+            key: "recent",
+            label: CategoryLabel::Text("title-category-recent"),
+            indices: recent,
+        });
+    }
+    for collection in &app.service.collections {
+        categories.push(Category {
+            key: collection.key,
+            label: CategoryLabel::Server(collection.title.clone()),
+            indices: collection.indices.clone(),
+        });
+    }
+    categories.push(Category {
+        key: "all",
+        label: CategoryLabel::Text("title-category-all"),
         indices: (0..app.service.titles.len()).collect(),
-    }]
+    });
+    categories
 }
 
 fn searching(app: &App) -> bool {
@@ -166,7 +193,7 @@ fn show_tab_bar(
     commands: &mut Vec<AppCommand>,
 ) {
     const HEIGHT: f32 = 30.0;
-    const SEARCH_WIDTH: f32 = 210.0;
+    const SEARCH_WIDTH: f32 = 170.0;
     const CLEAR_WIDTH: f32 = 30.0;
     let tab_font = egui::FontId::proportional(14.0);
     ui.horizontal(|ui| {
@@ -194,32 +221,59 @@ fn show_tab_bar(
                 if categories.len() > 1 {
                     ui.colored_label(theme.text, egui::RichText::new("L").font(tab_font.clone()));
                 }
-                for (index, category) in categories.iter().enumerate() {
-                    let active = index == current;
-                    let label = format!(
-                        "{} ({})",
-                        i18n.text(category.label_key),
-                        category.indices.len()
-                    );
-                    let button =
-                        egui::Button::new(egui::RichText::new(label).font(tab_font.clone()).color(
-                            if active {
-                                egui::Color32::WHITE
-                            } else {
-                                theme.text
-                            },
-                        ))
-                        .fill(if active {
-                            theme.accent
-                        } else {
-                            egui::Color32::from_rgb(0x26, 0x27, 0x2c)
-                        })
-                        .corner_radius(14.0)
-                        .min_size(egui::vec2(0.0, HEIGHT - 4.0));
-                    if ui.add(button).clicked() {
-                        commands.push(Command::SelectCategory(index).into());
-                    }
-                }
+                // Tabs scroll sideways when they do not all fit; the active one stays in view.
+                let scroll_width = (ui.available_width() - 16.0).max(0.0);
+                ui.allocate_ui_with_layout(
+                    egui::vec2(scroll_width, HEIGHT),
+                    egui::Layout::left_to_right(egui::Align::Center),
+                    |ui| {
+                        egui::ScrollArea::horizontal()
+                            .id_salt("title_tabs")
+                            .scroll_bar_visibility(
+                                egui::scroll_area::ScrollBarVisibility::AlwaysHidden,
+                            )
+                            .auto_shrink([true, true])
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.spacing_mut().item_spacing.x = 6.0;
+                                    for (index, category) in categories.iter().enumerate() {
+                                        let active = index == current;
+                                        let name = match &category.label {
+                                            CategoryLabel::Text(id) => i18n.text(id),
+                                            CategoryLabel::Server(title) => title.clone(),
+                                        };
+                                        let label = format!("{name} ({})", category.indices.len());
+                                        let button = egui::Button::new(
+                                            egui::RichText::new(label)
+                                                .font(tab_font.clone())
+                                                .color(if active {
+                                                    egui::Color32::WHITE
+                                                } else {
+                                                    theme.text
+                                                }),
+                                        )
+                                        .fill(if active {
+                                            theme.accent
+                                        } else {
+                                            egui::Color32::from_rgb(0x26, 0x27, 0x2c)
+                                        })
+                                        .corner_radius(14.0)
+                                        .min_size(egui::vec2(0.0, HEIGHT - 4.0));
+                                        let response = ui.add(button);
+                                        if active {
+                                            response.scroll_to_me(Some(egui::Align::Center));
+                                        }
+                                        if response.clicked() {
+                                            commands.push(Command::SelectCategory(index).into());
+                                        }
+                                    }
+                                    if app.collections_loading() {
+                                        ui.spinner();
+                                    }
+                                });
+                            });
+                    },
+                );
                 if categories.len() > 1 {
                     ui.colored_label(theme.text, egui::RichText::new("R").font(tab_font.clone()));
                 }
@@ -858,6 +912,7 @@ impl App {
         };
         let game_id = title.id;
         let target_id = title.launch_id;
+        self.note_title_played(&game_id);
         self.start_stream_for_target(StreamStartTarget {
             kind: StreamKind::Cloud,
             label: format!("cloud title {target_id}"),
@@ -865,6 +920,23 @@ impl App {
             game_id: Some(game_id),
             return_selected: selected,
         });
+    }
+
+    pub(crate) fn current_category_key(&self) -> &'static str {
+        let categories = categories(self);
+        categories
+            .get(self.title_category.min(categories.len().saturating_sub(1)))
+            .map_or("all", |category| category.key)
+    }
+
+    /// Points `title_category` back at the tab named `key` after the tab list changed.
+    pub(crate) fn restore_category(&mut self, key: &'static str) {
+        if let Some(index) = categories(self)
+            .iter()
+            .position(|category| category.key == key)
+        {
+            self.title_category = index;
+        }
     }
 
     fn set_title_category(&mut self, category: usize) {

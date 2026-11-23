@@ -42,6 +42,7 @@ title-play = ▶ 游玩
 title-no-description = 没有可用说明
 title-search = 搜索游戏...
 title-search-empty = 未找到游戏
+title-category-recent = Recently played
 title-category-all = All games
 title-category-results = Results
 screen-language-select = 语言

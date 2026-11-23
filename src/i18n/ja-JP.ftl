@@ -42,6 +42,7 @@ title-play = ▶ プレイ
 title-no-description = 説明はありません
 title-search = ゲームを検索...
 title-search-empty = ゲームが見つかりません
+title-category-recent = Recently played
 title-category-all = All games
 title-category-results = Results
 screen-language-select = 言語

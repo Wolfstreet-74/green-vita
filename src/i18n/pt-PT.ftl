@@ -42,6 +42,7 @@ title-play = ▶ JOGAR
 title-no-description = Nenhuma descrição disponível
 title-search = Pesquisar jogos...
 title-search-empty = Nenhum jogo encontrado
+title-category-recent = Jogados recentemente
 title-category-all = Todos os jogos
 title-category-results = Resultados
 screen-language-select = IDIOMA

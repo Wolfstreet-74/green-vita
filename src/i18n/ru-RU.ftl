@@ -42,6 +42,7 @@ title-play = ▶ ИГРАТЬ
 title-no-description = Описание недоступно
 title-search = Поиск игр...
 title-search-empty = Игры не найдены
+title-category-recent = Recently played
 title-category-all = All games
 title-category-results = Results
 screen-language-select = ЯЗЫК

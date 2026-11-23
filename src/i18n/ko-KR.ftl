@@ -42,6 +42,7 @@ title-play = ▶ 플레이
 title-no-description = 설명이 없습니다
 title-search = 게임 검색...
 title-search-empty = 게임을 찾을 수 없습니다
+title-category-recent = Recently played
 title-category-all = All games
 title-category-results = Results
 screen-language-select = 언어

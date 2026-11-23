@@ -288,6 +288,7 @@ impl App {
                 ),
             );
         }
+        self.pump_collections_job().await;
         self.prune_title_images();
         self.ensure_title_details_job();
         self.ensure_grid_jobs();

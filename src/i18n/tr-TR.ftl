@@ -42,6 +42,7 @@ title-play = ▶ OYNA
 title-no-description = Açıklama yok
 title-search = Oyun ara...
 title-search-empty = Oyun bulunamadı
+title-category-recent = Recently played
 title-category-all = All games
 title-category-results = Results
 screen-language-select = DİL
