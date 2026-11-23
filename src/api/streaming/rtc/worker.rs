@@ -17,6 +17,10 @@ const PUMP_SLEEP: Duration = Duration::from_millis(1);
 const PUMP_ERROR_SLEEP: Duration = Duration::from_millis(100);
 const GAMEPAD_PULSE_DURATION: Duration = Duration::from_millis(100);
 const GAMEPAD_REFRESH_INTERVAL: Duration = Duration::from_millis(50);
+/// At most one input packet per this interval while the controller state changes (sticks
+/// change nearly every sample). Sending one per millisecond flooded the input channel: on a
+/// lossy link SCTP slowed down and inputs piled up for seconds.
+const GAMEPAD_MIN_SEND_INTERVAL: Duration = Duration::from_millis(16);
 const MAX_PENDING_COMMANDS: usize = 16;
 const MAX_PENDING_EVENTS: usize = 32;
 const MAX_PENDING_AUDIO_BATCHES: usize = 16;
@@ -365,6 +369,12 @@ fn send_sampled_gamepad_frame<B: super::session::RtcSessionBackend>(
         *previous == sampled.frame && now.duration_since(*sent_at) < GAMEPAD_REFRESH_INTERVAL
     });
     if !force && unchanged_and_fresh {
+        return;
+    }
+    let too_soon = last_sent
+        .as_ref()
+        .is_some_and(|(_, sent_at)| now.duration_since(*sent_at) < GAMEPAD_MIN_SEND_INTERVAL);
+    if !force && too_soon {
         return;
     }
 

@@ -19,7 +19,18 @@ pub(super) struct XboxRtcProtocol {
     input_channel_ready: bool,
     server_video_size: Option<(u32, u32)>,
     channel_ids: ChannelIds,
+    /// Set when the input channel's send buffer is backing up (SCTP slowed down after
+    /// losses). Only the latest controller state matters, so while it is set new states are
+    /// not queued behind old ones - queuing them made the game replay inputs seconds late.
+    input_congested_since: Option<std::time::Instant>,
+    skipped_input_packets: u64,
 }
+
+/// Input send buffer level that counts as congested, and the level at which it is clear.
+const INPUT_BUFFER_HIGH: u32 = 1024;
+const INPUT_BUFFER_LOW: u32 = 256;
+/// Safety net if the "buffer low" event never comes: send again after this long anyway.
+const INPUT_CONGESTION_MAX_PAUSE: std::time::Duration = std::time::Duration::from_millis(100);
 
 impl XboxRtcProtocol {
     pub(super) fn new(channel_ids: ChannelIds) -> Self {
@@ -29,6 +40,8 @@ impl XboxRtcProtocol {
             input_channel_ready: false,
             server_video_size: None,
             channel_ids,
+            input_congested_since: None,
+            skipped_input_packets: 0,
         }
     }
 
@@ -39,6 +52,14 @@ impl XboxRtcProtocol {
     ) -> bool {
         if !self.input_channel_ready {
             return false;
+        }
+        if let Some(since) = self.input_congested_since {
+            if since.elapsed() < INPUT_CONGESTION_MAX_PAUSE {
+                // Not sent: the caller retries with the newest state on its next pass.
+                self.skipped_input_packets = self.skipped_input_packets.saturating_add(1);
+                return false;
+            }
+            self.input_congested_since = Some(std::time::Instant::now());
         }
         let Some(bytes) = self.input_queue.queue_gamepad_frames([frame], true) else {
             return false;
@@ -74,6 +95,8 @@ impl XboxRtcProtocol {
         if channel_id == channel_ids.input
             && let Some(mut input_channel) = peer.data_channel(channel_id)
         {
+            input_channel.set_buffered_amount_high_threshold(INPUT_BUFFER_HIGH);
+            input_channel.set_buffered_amount_low_threshold(INPUT_BUFFER_LOW);
             let client_metadata = self.input_queue.client_metadata_packet(0);
             let _ = input_channel.send(BytesMut::from(client_metadata.as_slice()));
             self.input_channel_ready = true;
@@ -143,5 +166,23 @@ impl RtcSessionBackend for XboxRtcProtocol {
 
     fn server_video_size(&self) -> Option<(u32, u32)> {
         self.server_video_size
+    }
+
+    fn handle_buffered_amount(&mut self, channel_id: RTCDataChannelId, high: bool) {
+        if channel_id != self.channel_ids.input {
+            return;
+        }
+        if high {
+            if self.input_congested_since.is_none() {
+                crate::diag_log::log("input", "input channel congested: holding stale inputs");
+            }
+            self.input_congested_since = Some(std::time::Instant::now());
+        } else {
+            self.input_congested_since = None;
+        }
+    }
+
+    fn skipped_input_packets(&self) -> u64 {
+        self.skipped_input_packets
     }
 }

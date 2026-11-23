@@ -43,6 +43,17 @@ pub(crate) trait RtcSessionBackend {
     fn send_pointer_event(&mut self, peer: &mut RTCPeerConnection, event: PointerEvent);
     fn notify_keyframe_requested(&mut self, peer: &mut RTCPeerConnection);
     fn server_video_size(&self) -> Option<(u32, u32)>;
+    /// The send buffer of a data channel went above (`high`) or back below its threshold.
+    fn handle_buffered_amount(
+        &mut self,
+        _channel_id: rtc::data_channel::RTCDataChannelId,
+        _high: bool,
+    ) {
+    }
+    /// Input packets not sent because the input channel was congested.
+    fn skipped_input_packets(&self) -> u64 {
+        0
+    }
 }
 
 pub(crate) struct RtcSession<B: RtcSessionBackend> {
@@ -143,11 +154,16 @@ impl<B: RtcSessionBackend> RtcSession<B> {
         if let Some(status) = self.video.status(now) {
             self.status = if let Some((width, height)) = self.backend.server_video_size() {
                 format!(
-                    "srv:{width}x{height} {status} kf:{}",
-                    self.keyframe_requests
+                    "srv:{width}x{height} {status} kf:{} inskip:{}",
+                    self.keyframe_requests,
+                    self.backend.skipped_input_packets()
                 )
             } else {
-                format!("srv:? {status} kf:{}", self.keyframe_requests)
+                format!(
+                    "srv:? {status} kf:{} inskip:{}",
+                    self.keyframe_requests,
+                    self.backend.skipped_input_packets()
+                )
             };
             // Keep the card log readable: first 10 reports, then one every 10 seconds.
             self.status_reports += 1;
@@ -228,6 +244,16 @@ impl<B: RtcSessionBackend> RtcSession<B> {
                 }
                 RTCPeerConnectionEvent::OnDataChannel(RTCDataChannelEvent::OnOpen(channel_id)) => {
                     self.backend.handle_channel_open(&mut self.peer, channel_id);
+                }
+                RTCPeerConnectionEvent::OnDataChannel(
+                    RTCDataChannelEvent::OnBufferedAmountHigh(channel_id),
+                ) => {
+                    self.backend.handle_buffered_amount(channel_id, true);
+                }
+                RTCPeerConnectionEvent::OnDataChannel(
+                    RTCDataChannelEvent::OnBufferedAmountLow(channel_id),
+                ) => {
+                    self.backend.handle_buffered_amount(channel_id, false);
                 }
                 _ => {}
             }
