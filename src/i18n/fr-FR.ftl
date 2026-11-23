@@ -27,7 +27,7 @@ settings-video-compat-mode-hint = À activer si un jeu a du son mais pas d'image
 settings-video-quality = Qualité du streaming
 settings-video-quality-high = Haute (720p)
 settings-video-quality-normal = Normale (720p)
-settings-video-quality-saver = Économie (540p)
+settings-video-quality-saver = Économie (débit réduit)
 settings-video-quality-hint = S'applique au prochain jeu lancé. Économie aide en 4G ou Wi-Fi faible.
 action-back = Retour
 

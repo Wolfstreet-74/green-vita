@@ -27,7 +27,7 @@ settings-video-compat-mode-hint = Use if a game has sound but no picture. Uses m
 settings-video-quality = Streaming quality
 settings-video-quality-high = High (720p)
 settings-video-quality-normal = Normal (720p)
-settings-video-quality-saver = Saver (540p)
+settings-video-quality-saver = Saver (lower bitrate)
 settings-video-quality-hint = Applies to the next game you start. Saver helps on weak 4G or Wi-Fi.
 action-back = Back
 
