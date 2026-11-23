@@ -95,6 +95,48 @@ impl Locale {
     }
 }
 
+/// Streaming quality asked of the server. On top of this ceiling, the server already adapts
+/// its bitrate to packet loss reported by the Vita.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum VideoQuality {
+    /// 1280x720, higher bitrate: sharpest, needs a good connection.
+    High,
+    /// 1280x720, moderate bitrate (the original behaviour).
+    #[default]
+    Normal,
+    /// 960x540 (the Vita's own screen size), low bitrate: for weak 4G / Wi-Fi.
+    Saver,
+}
+
+impl VideoQuality {
+    pub const ALL: [VideoQuality; 3] = [Self::High, Self::Normal, Self::Saver];
+
+    /// `(width, height, max bitrate in kbps)` requested from the server.
+    pub fn stream_request(self) -> (u32, u32, u32) {
+        match self {
+            Self::High => (1280, 720, 3500),
+            Self::Normal => (1280, 720, 2000),
+            Self::Saver => (960, 540, 1200),
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::High => Self::Normal,
+            Self::Normal => Self::Saver,
+            Self::Saver => Self::High,
+        }
+    }
+
+    pub fn label_id(self) -> &'static str {
+        match self {
+            Self::High => "settings-video-quality-high",
+            Self::Normal => "settings-video-quality-normal",
+            Self::Saver => "settings-video-quality-saver",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -104,6 +146,7 @@ pub struct Settings {
     /// Starts streams with a large hardware decoder (1920x1088, several reference frames).
     /// Fallback for games that play sound but show a black screen. Off by default.
     pub video_compat_mode: bool,
+    pub video_quality: VideoQuality,
     pub game_profiles: HashMap<String, GameProfile>,
 }
 
@@ -134,6 +177,7 @@ impl Default for Settings {
             locale: Locale::default(),
             show_stream_debug_info: false,
             video_compat_mode: false,
+            video_quality: VideoQuality::default(),
             game_profiles: HashMap::new(),
         }
     }

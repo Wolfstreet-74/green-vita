@@ -133,8 +133,14 @@ pub fn generate_message(path: &str, data: Value) -> Value {
 }
 
 pub fn startup_messages() -> Vec<Value> {
-    let width = STREAM_WIDTH;
-    let height = STREAM_HEIGHT;
+    let quality = crate::streaming::video::video_quality();
+    let (width, height, max_bitrate_kbps) = quality.stream_request();
+    // Never ask for more than the decoder is sized for at stream start.
+    let (width, height) = (width.min(STREAM_WIDTH), height.min(STREAM_HEIGHT));
+    crate::diag_log::log(
+        "video",
+        format!("Requesting stream {width}x{height} max {max_bitrate_kbps} kbps ({quality:?})"),
+    );
 
     vec![
         generate_message(
@@ -165,13 +171,13 @@ pub fn startup_messages() -> Vec<Value> {
                 "supportsFps": 30,
                 "maxWidth": width,
                 "maxHeight": height,
-                "maxBitrateKbps": 2000,
+                "maxBitrateKbps": max_bitrate_kbps,
                 "video": {
                     "width": width,
                     "height": height,
                     "maxWidth": width,
                     "maxHeight": height,
-                    "maxBitrateKbps": 2000,
+                    "maxBitrateKbps": max_bitrate_kbps,
                 },
             }),
         ),

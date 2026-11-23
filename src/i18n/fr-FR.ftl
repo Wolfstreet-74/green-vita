@@ -24,6 +24,11 @@ settings-home-host = Hôte local : { $host }
 settings-stream-debug-info = Afficher les infos de débogage du streaming
 settings-video-compat-mode = Mode vidéo compatible (écran noir)
 settings-video-compat-mode-hint = À activer si un jeu a du son mais pas d'image. Utilise plus de mémoire.
+settings-video-quality = Qualité du streaming
+settings-video-quality-high = Haute (720p)
+settings-video-quality-normal = Normale (720p)
+settings-video-quality-saver = Économie (540p)
+settings-video-quality-hint = S'applique au prochain jeu lancé. Économie aide en 4G ou Wi-Fi faible.
 action-back = Retour
 
 mode-select-cloud-subtitle = Jeux via Xbox Cloud Gaming

@@ -17,6 +17,7 @@ pub enum Command {
     SetFrontTouchAuxiliaryButtons { title_id: String, enabled: bool },
     SetShowStreamDebugInfo(bool),
     SetVideoCompatMode(bool),
+    SetVideoQuality(crate::settings::VideoQuality),
 }
 
 #[derive(Clone)]
@@ -28,6 +29,7 @@ enum SettingsRow {
     GameFrontTouchAuxiliary { title_id: String, enabled: bool },
     StreamDebug(bool),
     VideoCompat(bool),
+    VideoQuality(crate::settings::VideoQuality),
     Back,
 }
 
@@ -71,6 +73,7 @@ fn settings_rows(app: &App) -> Vec<SettingsRow> {
     rows.push(SettingsRow::StreamDebug(
         app.settings.show_stream_debug_info,
     ));
+    rows.push(SettingsRow::VideoQuality(app.settings.video_quality));
     rows.push(SettingsRow::VideoCompat(app.settings.video_compat_mode));
     rows.push(SettingsRow::Back);
     rows
@@ -234,6 +237,18 @@ pub(crate) fn show(ctx: &egui::Context, app: &App, commands: &mut Vec<AppCommand
                     );
                 }
                 row_index += 1;
+
+                let quality = app.settings.video_quality;
+                let quality_label = format!(
+                    "{} : {}  >",
+                    i18n.text("settings-video-quality"),
+                    i18n.text(quality.label_id())
+                );
+                if focus_row(ui, selected_index == row_index, quality_label) {
+                    commands.push(Command::SetVideoQuality(quality.next()).into());
+                }
+                row_index += 1;
+                ui.colored_label(theme.text, i18n.text("settings-video-quality-hint"));
 
                 if checkbox_row(
                     ui,
@@ -413,6 +428,9 @@ impl App {
             SettingsRow::VideoCompat(enabled) => {
                 return self.handle_settings_command(Command::SetVideoCompatMode(!enabled));
             }
+            SettingsRow::VideoQuality(quality) => {
+                return self.handle_settings_command(Command::SetVideoQuality(quality.next()));
+            }
             SettingsRow::Back => {}
         }
 
@@ -486,6 +504,11 @@ impl App {
             }
             Command::SetShowStreamDebugInfo(enabled) => {
                 self.settings.show_stream_debug_info = enabled;
+                self.settings.save();
+            }
+            Command::SetVideoQuality(quality) => {
+                self.settings.video_quality = quality;
+                crate::streaming::video::set_video_quality(quality);
                 self.settings.save();
             }
             Command::SetVideoCompatMode(enabled) => {

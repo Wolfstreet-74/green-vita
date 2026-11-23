@@ -41,6 +41,7 @@ impl App {
     pub fn new() -> Result<Self> {
         let settings = Settings::load();
         crate::streaming::video::set_video_compat_mode(settings.video_compat_mode);
+        crate::streaming::video::set_video_quality(settings.video_quality);
         let service = Service::new(settings.locale.as_str());
 
         Ok(Self {

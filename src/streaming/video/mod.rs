@@ -26,6 +26,23 @@ pub fn set_video_compat_mode(enabled: bool) {
     VIDEO_COMPAT_MODE.store(enabled, std::sync::atomic::Ordering::Relaxed);
 }
 
+/// Streaming quality from the settings, read when a stream starts.
+static VIDEO_QUALITY: std::sync::Mutex<crate::settings::VideoQuality> =
+    std::sync::Mutex::new(crate::settings::VideoQuality::Normal);
+
+pub fn set_video_quality(quality: crate::settings::VideoQuality) {
+    if let Ok(mut current) = VIDEO_QUALITY.lock() {
+        *current = quality;
+    }
+}
+
+pub fn video_quality() -> crate::settings::VideoQuality {
+    VIDEO_QUALITY
+        .lock()
+        .map(|quality| *quality)
+        .unwrap_or_default()
+}
+
 pub fn video_compat_mode() -> bool {
     VIDEO_COMPAT_MODE.load(std::sync::atomic::Ordering::Relaxed)
 }
