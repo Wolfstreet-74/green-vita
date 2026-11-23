@@ -219,6 +219,7 @@ pub(crate) fn show_hamburger_menu(
 impl App {
     pub(crate) fn handle_menu_input(&mut self, command: InputCommand) -> Result<()> {
         match command {
+            InputCommand::PrevPage | InputCommand::NextPage | InputCommand::Search => {}
             InputCommand::MoveUp => {
                 self.menu.selected =
                     crate::app::command::move_prev(self.menu.selected, MENU_ITEMS.len());

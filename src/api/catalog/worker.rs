@@ -17,7 +17,8 @@ const MAX_IMAGE_DECODE_BYTES: u64 = 12 * 1024 * 1024;
 pub enum ImageKind {
     Cover,
     Background,
-    Icon,
+    /// Small cover shown in the game grid.
+    Thumb,
     Avatar,
 }
 
@@ -34,11 +35,29 @@ enum CatalogJob {
         url: String,
         cache_locale: Option<String>,
     },
+    /// Metadata for several titles at once: `(game_id, metadata_id)` pairs.
+    MetadataBatch {
+        items: Vec<(String, String)>,
+        market: String,
+        language: String,
+    },
 }
 
 impl CatalogJob {
-    async fn run(self, client: &Client, backend: &GameCatalogBackend) -> CatalogResult {
+    async fn run(self, client: &Client, backend: &GameCatalogBackend) -> Vec<CatalogResult> {
         match self {
+            Self::MetadataBatch {
+                items,
+                market,
+                language,
+            } => run_metadata_batch(client, backend, items, &market, &language).await,
+            job => vec![job.run_single(client, backend).await],
+        }
+    }
+
+    async fn run_single(self, client: &Client, backend: &GameCatalogBackend) -> CatalogResult {
+        match self {
+            Self::MetadataBatch { .. } => unreachable!("batches are handled by run()"),
             Self::Metadata {
                 game_id,
                 metadata_id,
@@ -101,11 +120,76 @@ impl CatalogJob {
     }
 }
 
+async fn run_metadata_batch(
+    client: &Client,
+    backend: &GameCatalogBackend,
+    items: Vec<(String, String)>,
+    market: &str,
+    language: &str,
+) -> Vec<CatalogResult> {
+    let namespace = backend.cache_namespace();
+    let mut results = Vec::with_capacity(items.len());
+    let mut missing = Vec::new();
+    for (game_id, metadata_id) in items {
+        match load_cached_metadata(namespace, language, &game_id) {
+            Some(details) => results.push(CatalogResult::Metadata {
+                game_id,
+                details: Some(details),
+            }),
+            None => missing.push((game_id, metadata_id)),
+        }
+    }
+    if missing.is_empty() {
+        return results;
+    }
+
+    let ids: Vec<&str> = missing.iter().map(|(_, id)| id.as_str()).collect();
+    match backend
+        .fetch_details_batch(client, &ids, market, language)
+        .await
+    {
+        Ok(products) => {
+            for (game_id, metadata_id) in missing {
+                let details = products
+                    .iter()
+                    .find(|(product_id, _)| product_id.eq_ignore_ascii_case(&metadata_id))
+                    .map(|(_, details)| details.clone());
+                if let Some(details) = &details
+                    && let Err(error) = save_cached_metadata(namespace, language, &game_id, details)
+                {
+                    eprintln!("Catalog worker: failed to cache metadata for {game_id}: {error:#}");
+                }
+                // A title the catalog does not know gets empty details, so it is not asked again.
+                results.push(CatalogResult::Metadata {
+                    game_id,
+                    details: Some(details.unwrap_or_default()),
+                });
+            }
+        }
+        Err(error) => {
+            eprintln!(
+                "Catalog worker: metadata batch of {} failed: {error:#}",
+                missing.len()
+            );
+            crate::diag_log::log(
+                "catalog",
+                format!("metadata batch of {} failed: {error:#}", missing.len()),
+            );
+            results.push(CatalogResult::MetadataFailed {
+                game_ids: missing.into_iter().map(|(game_id, _)| game_id).collect(),
+            });
+        }
+    }
+    results
+}
+
 pub enum CatalogResult {
     Metadata {
         game_id: String,
         details: Option<GameDetails>,
     },
+    /// A batch request failed (network); these titles may be asked again later.
+    MetadataFailed { game_ids: Vec<String> },
     Image {
         game_id: String,
         kind: ImageKind,
@@ -149,14 +233,17 @@ impl CatalogWorker {
                 let outcome = catch_unwind(AssertUnwindSafe(|| {
                     runtime.block_on(job.run(&client, &backend))
                 }));
-                let result = match outcome {
-                    Ok(result) => result,
+                let results = match outcome {
+                    Ok(results) => results,
                     Err(_) => {
                         eprintln!("Catalog worker: job panicked; continuing");
                         continue;
                     }
                 };
-                if result_tx.send(result).is_err() {
+                if results
+                    .into_iter()
+                    .any(|result| result_tx.send(result).is_err())
+                {
                     break;
                 }
             }
@@ -179,6 +266,20 @@ impl CatalogWorker {
         self.send_job(CatalogJob::Metadata {
             game_id,
             metadata_id,
+            market,
+            language,
+        })
+    }
+
+    /// `items` are `(game_id, metadata_id)` pairs fetched in one catalog request.
+    pub fn request_metadata_batch(
+        &self,
+        items: Vec<(String, String)>,
+        market: String,
+        language: String,
+    ) -> bool {
+        self.send_job(CatalogJob::MetadataBatch {
+            items,
             market,
             language,
         })
@@ -254,7 +355,9 @@ impl ImageKind {
         match self {
             Self::Cover => (256, 256, false),
             Self::Background => (512, 512, false),
-            Self::Icon | Self::Avatar => (64, 64, true),
+            // Grid cell is about 140x210 screen pixels; a small texture keeps memory low.
+            Self::Thumb => (128, 192, false),
+            Self::Avatar => (64, 64, true),
         }
     }
 
@@ -262,7 +365,7 @@ impl ImageKind {
         match self {
             Self::Cover => Some("cover.image"),
             Self::Background => Some("background.image"),
-            Self::Icon => Some("icon.image"),
+            Self::Thumb => Some("thumb.image"),
             Self::Avatar => None,
         }
     }

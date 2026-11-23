@@ -36,6 +36,17 @@ pub fn map_controller_button_event(event: &Event) -> Option<AppCommand> {
         Event::ControllerButtonDown {
             button: Button::A, ..
         } => Some(InputCommand::Confirm.into()),
+        Event::ControllerButtonDown {
+            button: Button::LeftShoulder,
+            ..
+        } => Some(InputCommand::PrevPage.into()),
+        Event::ControllerButtonDown {
+            button: Button::RightShoulder,
+            ..
+        } => Some(InputCommand::NextPage.into()),
+        Event::ControllerButtonDown {
+            button: Button::Y, ..
+        } => Some(InputCommand::Search.into()),
         _ => None,
     }
 }

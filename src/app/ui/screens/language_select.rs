@@ -70,6 +70,7 @@ impl App {
         };
 
         match command {
+            InputCommand::PrevPage | InputCommand::NextPage | InputCommand::Search => {}
             InputCommand::MoveUp => *selected = move_prev(*selected, ROW_COUNT),
             InputCommand::MoveDown => *selected = move_next(*selected, ROW_COUNT),
             InputCommand::MoveLeft | InputCommand::MoveRight | InputCommand::Back => {}

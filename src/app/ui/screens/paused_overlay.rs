@@ -91,6 +91,7 @@ impl App {
             return Ok(());
         };
         match command {
+            InputCommand::PrevPage | InputCommand::NextPage | InputCommand::Search => {}
             InputCommand::MoveUp => {
                 if let AppState::Streaming(streaming) = &mut self.state {
                     streaming.pause_selected =

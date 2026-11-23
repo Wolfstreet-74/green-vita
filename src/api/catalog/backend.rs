@@ -61,6 +61,23 @@ impl GameCatalogBackend {
     }
 }
 
+impl GameCatalogBackend {
+    /// Several titles in one request; see `fetch_details`.
+    pub(crate) async fn fetch_details_batch(
+        &self,
+        client: &Client,
+        metadata_ids: &[&str],
+        market: &str,
+        language: &str,
+    ) -> Result<Vec<(String, GameDetails)>> {
+        match self {
+            Self::XCloud { .. } => {
+                game_catalog::fetch_details_batch(client, metadata_ids, market, language).await
+            }
+        }
+    }
+}
+
 fn load_cached_games(namespace: &str) -> Option<Vec<Game>> {
     let path = cache::provider_path(namespace, "games.json");
     let bytes = cache::read(&path)?;

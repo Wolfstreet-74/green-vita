@@ -195,6 +195,9 @@ impl App {
             PollJob::Pending(job) => self.state = AppState::LoadingTitles(job),
             PollJob::Done(Ok(games)) => {
                 self.service.titles = games;
+                self.title_details_open = false;
+                self.title_grid_visible = (0, 0);
+                self.title_category = 0;
                 self.set_state(AppState::TitleList { selected: 0 });
             }
             PollJob::Done(Err(error)) => {

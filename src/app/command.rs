@@ -19,6 +19,12 @@ pub enum InputCommand {
     MoveRight,
     Confirm,
     Back,
+    /// L shoulder: previous tab/page (game grid categories).
+    PrevPage,
+    /// R shoulder: next tab/page.
+    NextPage,
+    /// Triangle: open search where a screen has one.
+    Search,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

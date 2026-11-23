@@ -20,19 +20,18 @@ use crate::settings::Settings;
 use anyhow::Result;
 use fluent_bundle::FluentArgs;
 use std::fmt::Display;
-use std::time::Instant;
-
-pub(crate) struct TitleInitialOverlay {
-    pub(crate) label: String,
-    pub(crate) shown_at: Instant,
-}
 
 pub struct App {
     pub settings: Settings,
     pub(crate) service: Service,
     pub(crate) state: AppState,
     pub(crate) menu: MenuState,
-    pub(crate) title_initial_overlay: Option<TitleInitialOverlay>,
+    /// Game grid: the details page of the selected game is shown over the grid.
+    pub(crate) title_details_open: bool,
+    /// Game grid: first and one-past-last positions on screen, reported by the UI.
+    pub(crate) title_grid_visible: (usize, usize),
+    /// Game grid: index of the shown category tab.
+    pub(crate) title_category: usize,
     pub(crate) title_search_query: String,
     pub(crate) title_search_requested: bool,
 }
@@ -48,7 +47,9 @@ impl App {
             service,
             state: AppState::InitializeAuthentication,
             menu: MenuState::default(),
-            title_initial_overlay: None,
+            title_details_open: false,
+            title_grid_visible: (0, 0),
+            title_category: 0,
             title_search_query: String::new(),
             title_search_requested: false,
             settings,

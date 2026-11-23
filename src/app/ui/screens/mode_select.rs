@@ -103,6 +103,7 @@ impl App {
             return Ok(());
         };
         match command {
+            InputCommand::PrevPage | InputCommand::NextPage | InputCommand::Search => {}
             InputCommand::MoveUp => *selected = move_prev(*selected, OPTION_COUNT),
             InputCommand::MoveDown => *selected = move_next(*selected, OPTION_COUNT),
             InputCommand::MoveLeft | InputCommand::MoveRight => {}

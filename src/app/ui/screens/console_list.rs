@@ -64,6 +64,7 @@ impl App {
     pub(crate) async fn handle_console_list_input(&mut self, command: InputCommand) -> Result<()> {
         let item_count = self.service.consoles.len();
         match command {
+            InputCommand::PrevPage | InputCommand::NextPage | InputCommand::Search => {}
             InputCommand::MoveUp => {
                 if let AppState::ConsoleList { selected } = &mut self.state {
                     *selected = move_prev(*selected, item_count);

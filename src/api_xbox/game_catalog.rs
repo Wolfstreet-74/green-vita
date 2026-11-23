@@ -18,7 +18,24 @@ pub async fn fetch_details(
     language: &str,
 ) -> Result<GameDetails> {
     let details = catalog::fetch_title_details(client, metadata_id, market, language).await?;
-    Ok(GameDetails {
+    Ok(to_game_details(details))
+}
+
+pub async fn fetch_details_batch(
+    client: &Client,
+    metadata_ids: &[&str],
+    market: &str,
+    language: &str,
+) -> Result<Vec<(String, GameDetails)>> {
+    let products = catalog::fetch_titles_details(client, metadata_ids, market, language).await?;
+    Ok(products
+        .into_iter()
+        .map(|(product_id, details)| (product_id, to_game_details(details)))
+        .collect())
+}
+
+fn to_game_details(details: catalog::TitleCatalogDetails) -> GameDetails {
+    GameDetails {
         name: details.name,
         description: details.description,
         box_art_url: details.box_art_url,
@@ -31,7 +48,7 @@ pub async fn fetch_details(
         average_rating: details.average_rating,
         rating_count: details.rating_count,
         content_rating: details.content_rating,
-    })
+    }
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -84,7 +101,7 @@ fn extract_games(value: &serde_json::Value) -> Vec<Game> {
                 launch_id: slug,
                 metadata_id: entry.details.product_id,
                 details: None,
-                icon: None,
+                thumb: None,
                 box_art: None,
                 background: None,
             })

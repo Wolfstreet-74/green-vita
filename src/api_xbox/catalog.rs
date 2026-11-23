@@ -29,6 +29,8 @@ struct CatalogResponse {
 
 #[derive(Debug, Deserialize)]
 struct CatalogProduct {
+    #[serde(default, rename = "ProductId")]
+    product_id: String,
     #[serde(default, rename = "LocalizedProperties")]
     localized_properties: Vec<CatalogLocalizedProperties>,
     #[serde(default, rename = "MarketProperties")]
@@ -115,20 +117,48 @@ pub async fn fetch_title_details(
     market: &str,
     language: &str,
 ) -> Result<TitleCatalogDetails> {
+    let products = fetch_products(client, &[product_id], market, language).await?;
+    let Some(product) = products.into_iter().next() else {
+        bail!("no catalog listing found for product {product_id}");
+    };
+    parse_product(product)
+        .map(|(_, details)| details)
+        .with_context(|| format!("no localized catalog listing found for product {product_id}"))
+}
+
+/// Fetches display metadata for several products in one request (the catalog accepts a
+/// comma-separated `bigIds` list). Returns `(productId, details)` for each product found;
+/// products missing from the answer are simply absent.
+pub async fn fetch_titles_details(
+    client: &Client,
+    product_ids: &[&str],
+    market: &str,
+    language: &str,
+) -> Result<Vec<(String, TitleCatalogDetails)>> {
+    let products = fetch_products(client, product_ids, market, language).await?;
+    Ok(products.into_iter().filter_map(parse_product).collect())
+}
+
+async fn fetch_products(
+    client: &Client,
+    product_ids: &[&str],
+    market: &str,
+    language: &str,
+) -> Result<Vec<CatalogProduct>> {
+    let ids = product_ids.join(",");
     let url = format!(
-        "https://displaycatalog.mp.microsoft.com/v7.0/products?bigIds={product_id}&market={market}&languages={language}&fieldsTemplate=Details"
+        "https://displaycatalog.mp.microsoft.com/v7.0/products?bigIds={ids}&market={market}&languages={language}&fieldsTemplate=Details"
     );
     let bytes = get_bytes(client, &url, "Catalog").await?;
     let response: CatalogResponse =
         serde_json::from_slice(&bytes).context("failed to parse catalog response")?;
+    Ok(response.products)
+}
 
-    let Some(product) = response.products.into_iter().next() else {
-        bail!("no catalog listing found for product {product_id}");
-    };
+fn parse_product(product: CatalogProduct) -> Option<(String, TitleCatalogDetails)> {
+    let product_id = product.product_id;
     let market = product.market_properties.into_iter().next();
-    let Some(localized) = product.localized_properties.into_iter().next() else {
-        bail!("no localized catalog listing found for product {product_id}");
-    };
+    let localized = product.localized_properties.into_iter().next()?;
 
     let find_image = |purpose: &str| {
         localized
@@ -161,7 +191,7 @@ pub async fn fetch_title_details(
                 .or_else(|| rating.rating_system.clone())
         });
 
-    Ok(TitleCatalogDetails {
+    let details = TitleCatalogDetails {
         name: localized.product_title,
         description: localized
             .short_description
@@ -182,5 +212,6 @@ pub async fn fetch_title_details(
         average_rating: usage_data.and_then(|u| u.average_rating),
         rating_count: usage_data.and_then(|u| u.rating_count),
         content_rating,
-    })
+    };
+    Some((product_id, details))
 }

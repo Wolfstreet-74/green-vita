@@ -369,6 +369,7 @@ impl App {
     pub(crate) fn handle_settings_input(&mut self, command: InputCommand) -> Result<()> {
         let rows = settings_rows(self);
         match command {
+            InputCommand::PrevPage | InputCommand::NextPage | InputCommand::Search => {}
             InputCommand::MoveUp => {
                 if let AppState::Settings { selected, .. } = &mut self.state {
                     *selected = move_prev(*selected, rows.len());

@@ -62,6 +62,7 @@ fn field(i18n: &I18n, key: &'static str, value: &str) -> String {
 impl App {
     pub(crate) async fn handle_connecting_input(&mut self, command: InputCommand) -> Result<()> {
         match command {
+            InputCommand::PrevPage | InputCommand::NextPage | InputCommand::Search => {}
             InputCommand::Back => {
                 let state =
                     std::mem::replace(&mut self.state, AppState::ModeSelect { selected: 0 });

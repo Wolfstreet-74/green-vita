@@ -17,8 +17,9 @@ pub struct Game {
     /// Opaque identifier used when the provider loads additional metadata.
     pub metadata_id: Option<String>,
     pub details: Option<GameDetails>,
+    /// Small cover for the game grid.
     #[serde(skip)]
-    pub icon: Option<Arc<TitleImage>>,
+    pub thumb: Option<Arc<TitleImage>>,
     #[serde(skip)]
     pub box_art: Option<Arc<TitleImage>>,
     #[serde(skip)]
@@ -26,6 +27,13 @@ pub struct Game {
 }
 
 impl Game {
+    /// URL of the small grid cover, derived from the box art URL (the CDN resizes on `?h=`).
+    pub fn thumb_url(&self) -> Option<String> {
+        let url = self.details.as_ref()?.box_art_url.as_deref()?;
+        let base = url.split_once('?').map_or(url, |(base, _)| base);
+        Some(format!("{base}?h=192"))
+    }
+
     pub fn display_name(&self) -> &str {
         self.details
             .as_ref()

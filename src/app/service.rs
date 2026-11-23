@@ -15,7 +15,9 @@ pub(crate) struct Service {
     pub(crate) title_detail_pending: HashSet<String>,
     pub(crate) box_art_pending: HashSet<String>,
     pub(crate) background_pending: HashSet<String>,
-    pub(crate) icon_pending: HashSet<String>,
+    pub(crate) thumb_pending: HashSet<String>,
+    /// Set after a failed catalog request: no new metadata batch before this time.
+    pub(crate) metadata_retry_after: Option<std::time::Instant>,
     pub(crate) avatar: Option<Arc<TitleImage>>,
     pub(crate) gamertag: Option<String>,
     pub(crate) gamerscore: Option<String>,
@@ -43,7 +45,8 @@ impl Service {
             title_detail_pending: HashSet::new(),
             box_art_pending: HashSet::new(),
             background_pending: HashSet::new(),
-            icon_pending: HashSet::new(),
+            thumb_pending: HashSet::new(),
+            metadata_retry_after: None,
             avatar: None,
             gamertag: None,
             gamerscore: None,
@@ -76,7 +79,8 @@ impl Service {
         self.title_detail_pending.clear();
         self.box_art_pending.clear();
         self.background_pending.clear();
-        self.icon_pending.clear();
+        self.thumb_pending.clear();
+        self.metadata_retry_after = None;
     }
 
     pub(super) fn refresh_xcloud_catalog_backend(&mut self) {
